@@ -51,6 +51,25 @@ class Auth {
     const loginForm = document.getElementById('loginForm');
     const registerForm = document.getElementById('registerForm');
 
+    if (window.API?.isAppsScriptMode) {
+      const loginLabel = document.querySelector('label[for="loginEmail"]');
+      const loginInput = document.getElementById('loginEmail');
+      const loginPassword = document.getElementById('loginPassword');
+      const loginPasswordGroup = loginPassword?.closest('.form-group');
+      const registerPassword = document.getElementById('registerPassword');
+      const registerPasswordGroup = registerPassword?.closest('.form-group');
+
+      if (loginLabel) loginLabel.textContent = 'Name or User ID';
+      if (loginInput) {
+        loginInput.type = 'text';
+        loginInput.placeholder = 'Exact name or user ID from Google Sheets';
+      }
+      if (loginPassword) loginPassword.required = false;
+      if (loginPasswordGroup) loginPasswordGroup.classList.add('hidden');
+      if (registerPassword) registerPassword.required = false;
+      if (registerPasswordGroup) registerPasswordGroup.classList.add('hidden');
+    }
+
     loginForm.addEventListener('submit', (e) => this.handleLogin(e));
     registerForm.addEventListener('submit', (e) => this.handleRegister(e));
   }
@@ -79,7 +98,13 @@ class Auth {
     const password = document.getElementById('registerPassword').value;
 
     try {
-      await window.API.register(name, email, password);
+      const result = await window.API.register(name, email, password);
+      if (window.API.isAppsScriptMode && result?.token && result?.user) {
+        localStorage.setItem('token', result.token);
+        localStorage.setItem('user', JSON.stringify(result.user));
+        window.location.reload();
+        return;
+      }
       window.UI?.showToast('Registration successful! Please login.', 'success');
       document.getElementById('registerForm').reset();
     } catch (error) {
@@ -95,9 +120,19 @@ class Auth {
       }
       const userName = document.getElementById('userName');
       const userRole = document.getElementById('userRole');
+      const sidebarAvatar = document.getElementById('sidebarAvatar');
 
       if (userName) userName.textContent = user.name;
       if (userRole) userRole.textContent = user.role;
+      if (sidebarAvatar) {
+        if (user.avatar_url) {
+          sidebarAvatar.src = `${user.avatar_url}?t=${Date.now()}`;
+          sidebarAvatar.classList.remove('hidden');
+        } else {
+          sidebarAvatar.removeAttribute('src');
+          sidebarAvatar.classList.add('hidden');
+        }
+      }
 
       // Store user in window for global access
       window.currentUser = user;

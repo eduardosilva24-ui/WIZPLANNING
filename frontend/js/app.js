@@ -10,6 +10,8 @@ class App {
     window.LessonPlanner?.init?.();
     window.Community?.init?.();
     window.Rewards?.init?.();
+    window.Notifications?.init?.();
+    window.Profile?.init?.();
   }
 }
 

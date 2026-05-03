@@ -104,6 +104,15 @@
                         <span class="icon">🏆</span>
                         <span>Rewards</span>
                     </button>
+                    <button class="nav-item" data-page="notifications">
+                        <span class="icon">!</span>
+                        <span>Notifications</span>
+                        <span id="notificationBadge" class="notification-badge hidden">0</span>
+                    </button>
+                    <button class="nav-item" data-page="profile">
+                        <span class="icon">P</span>
+                        <span>Profile</span>
+                    </button>
                 </nav>
 
                 <div class="sidebar-footer">
@@ -252,11 +261,11 @@
                                 </div>
 
                                 <div class="form-group">
-                                    <label for="activityFile">File (PDF, Image, etc.)</label>
-                                    <input type="file" id="activityFile" required>
+                                    <label for="activityFileUrl">Material URL</label>
+                                    <input type="url" id="activityFileUrl" placeholder="https://drive.google.com/...">
                                 </div>
 
-                                <button type="submit" class="btn btn-primary">Upload Activity</button>
+                                <button type="submit" class="btn btn-primary">Share Activity</button>
                             </form>
                         </section>
 
@@ -295,6 +304,12 @@
                             </div>
 
                             <button id="dailyBonusBtn" class="btn btn-secondary">Claim Daily Bonus</button>
+                            <div class="badges-section">
+                                <h3>Your Badges</h3>
+                                <div id="badgesList" class="badges-list">
+                                    <p class="empty-state">No badges yet.</p>
+                                </div>
+                            </div>
                         </section>
 
                         <section class="leaderboard">
@@ -317,6 +332,70 @@
                         </section>
                     </div>
                 </div>
+
+                <!-- Notifications Page -->
+                <div id="notificationsPage" class="page-content">
+                    <header class="page-header">
+                        <h1>Notifications</h1>
+                        <p>Keep track of likes, badge unlocks, and teacher activity.</p>
+                    </header>
+
+                    <div class="notifications-panel">
+                        <div class="section-heading">
+                            <h2>Recent Updates</h2>
+                            <button id="markAllNotificationsReadBtn" class="btn btn-outline" type="button">Mark all read</button>
+                        </div>
+                        <div id="notificationsList" class="notifications-list">
+                            <p class="empty-state">No notifications yet.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Profile Page -->
+                <div id="profilePage" class="page-content">
+                    <header class="page-header">
+                        <h1>Profile</h1>
+                        <p>Keep your teacher profile current for the community.</p>
+                    </header>
+
+                    <div class="profile-container">
+                        <section class="profile-card">
+                            <h2>Edit Profile</h2>
+                            <div class="profile-preview">
+                                <div>
+                                    <h2 id="profilePreviewName">Teacher</h2>
+                                    <p id="profilePreviewBio">No bio yet.</p>
+                                    <small id="profilePreviewMeta"></small>
+                                </div>
+                            </div>
+                            <form id="profileForm" class="profile-form">
+                                <div class="form-group">
+                                    <label for="profileName">Name</label>
+                                    <input type="text" id="profileName" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="profileBio">Bio</label>
+                                    <textarea id="profileBio" rows="4" placeholder="Tell colleagues about your teaching style, classes, and interests."></textarea>
+                                </div>
+                                <div class="form-row-split">
+                                    <div class="form-group">
+                                        <label for="profileLocation">Location</label>
+                                        <input type="text" id="profileLocation" placeholder="City, school, or unit">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="profilePhone">Contact</label>
+                                        <input type="text" id="profilePhone" placeholder="WhatsApp, email, or preferred contact">
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <label for="profileSpecialties">Specialties</label>
+                                    <input type="text" id="profileSpecialties" placeholder="Kids, teens, conversation, grammar, exams">
+                                </div>
+                                <button type="submit" class="btn btn-primary">Save Profile</button>
+                            </form>
+                        </section>
+                    </div>
+                </div>
             </main>
         </div>
     </div>
@@ -331,6 +410,8 @@
     <script src="frontend/js/lessonPlanner.js"></script>
     <script src="frontend/js/community.js"></script>
     <script src="frontend/js/rewards.js"></script>
+    <script src="frontend/js/notifications.js"></script>
+    <script src="frontend/js/profile.js"></script>
     <script src="frontend/js/app.js"></script>
 </body>
 </html>

@@ -14,6 +14,7 @@ class Rewards {
         window.UI.showToast(result.message || 'Already claimed', 'info');
       }
       await this.refreshRewards(true);
+      await window.Notifications?.refreshUnreadCount?.();
     } catch (e) {
       window.UI.showToast(e.message, 'error');
     } finally {
@@ -47,15 +48,61 @@ class Rewards {
     if (els.dashboardLevel) els.dashboardLevel.textContent = rewards.level;
     if (els.userLevel) els.userLevel.textContent = rewards.level;
     if (els.badgeCount) els.badgeCount.textContent = (rewards.badges?.length || 0).toString();
+    this.renderBadges(rewards.badges || []);
+  }
+
+  static renderBadges(badges) {
+    const container = document.getElementById('badgesList');
+    if (!container) return;
+
+    container.replaceChildren();
+    if (!badges.length) {
+      window.UI?.renderState(container, 'empty', 'No badges yet.');
+      return;
+    }
+
+    badges.forEach(badge => {
+      const item = document.createElement('article');
+      item.className = 'badge-card';
+
+      const icon = document.createElement('span');
+      icon.className = 'badge-icon';
+      icon.textContent = badge.icon || 'Badge';
+
+      const text = document.createElement('div');
+      const title = document.createElement('h4');
+      title.textContent = badge.name || badge.id || 'Badge';
+
+      const description = document.createElement('p');
+      description.textContent = badge.description || 'Achievement unlocked.';
+
+      text.append(title, description);
+      item.append(icon, text);
+      container.appendChild(item);
+    });
   }
 
   static renderLeaderboardRow(entry, index) {
     const row = document.createElement('tr');
-    [index + 1, entry.name, entry.points, entry.level].forEach(value => {
-      const cell = document.createElement('td');
-      cell.textContent = value;
-      row.appendChild(cell);
-    });
+
+    const rank = document.createElement('td');
+    rank.textContent = index + 1;
+
+    const teacher = document.createElement('td');
+    const teacherButton = document.createElement('button');
+    teacherButton.type = 'button';
+    teacherButton.className = 'teacher-link';
+    teacherButton.textContent = entry.name;
+    teacherButton.addEventListener('click', () => window.Community?.openTeacherProfile?.(entry.id));
+    teacher.appendChild(teacherButton);
+
+    const points = document.createElement('td');
+    points.textContent = entry.points;
+
+    const level = document.createElement('td');
+    level.textContent = entry.level;
+
+    row.append(rank, teacher, points, level);
     return row;
   }
 

@@ -1,15 +1,9 @@
-import sqlite3 from 'sqlite3';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-const dbPath = join(__dirname, '../../database/database.db');
+import { openDatabase } from '../database/client.js';
+import RewardService from './RewardService.js';
 
 export class LessonPlanService {
   constructor() {
-    this.db = new sqlite3.Database(dbPath);
+    this.db = openDatabase();
   }
 
   /**
@@ -32,16 +26,12 @@ export class LessonPlanService {
 
           const planId = this.lastID;
 
-          // Award points for creating lesson plan
-          db.run(
-            `UPDATE rewards SET points = points + 10 WHERE user_id = ?`,
-            [userId],
-            (err) => {
-              if (err) console.error('Error awarding points:', err);
-            }
-          );
-
-          resolve({ id: planId, userId, studentName, book, lesson });
+          const rewards = new RewardService();
+          rewards
+            .awardPoints(userId, 10, 'lesson_plan_create')
+            .then(() => resolve({ id: planId, userId, studentName, book, lesson }))
+            .catch(reject)
+            .finally(() => rewards.close());
         }
       );
     });
@@ -160,16 +150,12 @@ export class LessonPlanService {
 
           const planId = this.lastID;
 
-          // Award 20 points for class plan
-          db.run(
-            `UPDATE rewards SET points = points + 20 WHERE user_id = ?`,
-            [userId],
-            (err) => {
-              if (err) console.error('Error awarding class points:', err);
-            }
-          );
-
-          resolve({ id: planId, title, type: 'class' });
+          const rewards = new RewardService();
+          rewards
+            .awardPoints(userId, 20, 'class_plan_create')
+            .then(() => resolve({ id: planId, title, type: 'class' }))
+            .catch(reject)
+            .finally(() => rewards.close());
         }
       );
     });

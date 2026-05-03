@@ -1,12 +1,28 @@
 // API Helper Functions
 const API_BASE = window.APP_CONFIG?.API_BASE || '/api';
+const APPS_SCRIPT_API_BASE = window.APP_CONFIG?.APPS_SCRIPT_API_BASE || '';
 
 class API {
   static staticKeys = {
     users: 'wizplanning:static:users:v1',
     lessonPlans: 'wizplanning:static:lessonPlans:v1',
     activities: 'wizplanning:static:activities:v1',
-    rewards: 'wizplanning:static:rewards:v1'
+    rewards: 'wizplanning:static:rewards:v1',
+    notifications: 'wizplanning:static:notifications:v1'
+  };
+
+  static staticBadgeDefinitions = {
+    first_lesson: { id: 'first_lesson', name: 'First Class Planned', description: 'Prepared the first class plan.', icon: 'Lesson' },
+    first_post: { id: 'first_post', name: 'Community Starter', description: 'Shared the first activity with other teachers.', icon: 'Post' },
+    first_like_given: { id: 'first_like_given', name: 'Peer Supporter', description: 'Liked another teacher activity for the first time.', icon: 'Like' },
+    first_like_received: { id: 'first_like_received', name: 'Peer Approved', description: 'Received the first like on a shared activity.', icon: 'Star' },
+    profile_complete: { id: 'profile_complete', name: 'Introduced', description: 'Completed the teacher profile with photo and bio.', icon: 'Profile' },
+    daily_bonus: { id: 'daily_bonus', name: 'Daily Check-in', description: 'Claimed the first daily bonus.', icon: 'Daily' },
+    points_50: { id: 'points_50', name: '50 Point Spark', description: 'Reached 50 reward points.', icon: '50' },
+    points_150: { id: 'points_150', name: '150 Point Builder', description: 'Reached 150 reward points.', icon: '150' },
+    points_300: { id: 'points_300', name: '300 Point Pro', description: 'Reached 300 reward points.', icon: '300' },
+    points_500: { id: 'points_500', name: '500 Point Master', description: 'Reached 500 reward points.', icon: '500' },
+    top_teacher: { id: 'top_teacher', name: 'Leaderboard Leader', description: 'Reached first place on the leaderboard.', icon: 'Top' }
   };
 
   static staticPlannerDataPromise = null;
@@ -15,12 +31,450 @@ class API {
     return Boolean(window.APP_CONFIG?.STATIC_MODE);
   }
 
+  static get isAppsScriptMode() {
+    return Boolean(window.APP_CONFIG?.APPS_SCRIPT_MODE && APPS_SCRIPT_API_BASE);
+  }
+
   static getHeaders() {
     const token = localStorage.getItem('token');
     return {
       'Content-Type': 'application/json',
       ...(token && { Authorization: `Bearer ${token}` })
     };
+  }
+
+  static async appsScriptAction(action, params = {}, options = {}) {
+    if (!APPS_SCRIPT_API_BASE) {
+      throw new Error('Google Apps Script API URL is not configured.');
+    }
+
+    const method = String(options.method || 'GET').toUpperCase();
+    const query = new URLSearchParams({ action });
+    const fetchOptions = { method };
+
+    if (method === 'GET') {
+      Object.entries(params).forEach(([key, value]) => {
+        if (value !== undefined && value !== null) query.set(key, value);
+      });
+    } else {
+      fetchOptions.body = new URLSearchParams(
+        Object.entries(params).reduce((payload, [key, value]) => {
+          if (value !== undefined && value !== null) payload[key] = value;
+          return payload;
+        }, {})
+      );
+    }
+
+    const response = await fetch(`${APPS_SCRIPT_API_BASE}?${query.toString()}`, fetchOptions);
+    const payload = await response.json().catch(() => ({}));
+
+    if (!response.ok || payload.success === false) {
+      throw API._makeHttpError(response.status || 500, payload);
+    }
+
+    return payload.data;
+  }
+
+  static appsScriptGetUsers() {
+    return this.appsScriptAction('getUsers');
+  }
+
+  static appsScriptGetUser(userId) {
+    return this.appsScriptAction('getUser', { userId });
+  }
+
+  static appsScriptCreateUser(user) {
+    return this.appsScriptAction('createUser', {
+      name: user?.name || '',
+      bio: user?.bio || '',
+      photo_url: user?.photo_url || ''
+    }, { method: 'POST' });
+  }
+
+  static appsScriptUpdateUser(user) {
+    return this.appsScriptAction('updateUser', {
+      userId: user?.userId || user?.id,
+      name: user?.name,
+      bio: user?.bio,
+      photo_url: user?.photo_url
+    }, { method: 'POST' });
+  }
+
+  static appsScriptGetMedals(userId) {
+    return this.appsScriptAction('getMedals', { userId });
+  }
+
+  static appsScriptAddMedal(medal) {
+    return this.appsScriptAction('addMedal', {
+      userId: medal?.userId || medal?.user_id,
+      medal_name: medal?.medal_name || medal?.medalName,
+      date: medal?.date
+    }, { method: 'POST' });
+  }
+
+  static appsScriptGetNotifications(userId) {
+    return this.appsScriptAction('getNotifications', { userId });
+  }
+
+  static appsScriptCreateNotification(notification) {
+    return this.appsScriptAction('createNotification', {
+      userId: notification?.userId || notification?.user_id,
+      message: notification?.message,
+      read: notification?.read
+    }, { method: 'POST' });
+  }
+
+  static appsScriptMarkNotificationRead(notification) {
+    return this.appsScriptAction('markNotificationRead', {
+      notificationId: notification?.notificationId || notification?.id,
+      userId: notification?.userId || notification?.user_id
+    }, { method: 'POST' });
+  }
+
+  static appsScriptMarkAllNotificationsRead(userId) {
+    return this.appsScriptAction('markAllNotificationsRead', { userId }, { method: 'POST' });
+  }
+
+  static appsScriptGetLessonPlans(userId, limit = 50, offset = 0) {
+    return this.appsScriptAction('getLessonPlans', { userId, limit, offset });
+  }
+
+  static appsScriptGetLessonPlan(userId, id) {
+    return this.appsScriptAction('getLessonPlan', { userId, id });
+  }
+
+  static appsScriptCreateLessonPlan(plan) {
+    return this.appsScriptAction('createLessonPlan', plan, { method: 'POST' });
+  }
+
+  static appsScriptSaveClassPlan(plan) {
+    return this.appsScriptAction('saveClassPlan', plan, { method: 'POST' });
+  }
+
+  static appsScriptUpdateLessonPlan(plan) {
+    return this.appsScriptAction('updateLessonPlan', plan, { method: 'POST' });
+  }
+
+  static appsScriptDeleteLessonPlan(userId, id) {
+    return this.appsScriptAction('deleteLessonPlan', { userId, id }, { method: 'POST' });
+  }
+
+  static appsScriptGetRewards(userId) {
+    return this.appsScriptAction('getRewards', { userId });
+  }
+
+  static appsScriptClaimDailyBonus(userId) {
+    return this.appsScriptAction('claimDailyBonus', { userId }, { method: 'POST' });
+  }
+
+  static appsScriptGetLeaderboard(limit = 10) {
+    return this.appsScriptAction('getLeaderboard', { limit });
+  }
+
+  static appsScriptGetActivities(userId, limit = 20, offset = 0) {
+    return this.appsScriptAction('getActivities', { userId, limit, offset });
+  }
+
+  static appsScriptGetActivitiesByCategory(userId, category, limit = 20, offset = 0) {
+    return this.appsScriptAction('getActivitiesByCategory', { userId, category, limit, offset });
+  }
+
+  static appsScriptGetUserActivities(currentUserId, targetUserId, limit = 20, offset = 0) {
+    return this.appsScriptAction('getUserActivities', { userId: currentUserId, targetUserId, limit, offset });
+  }
+
+  static appsScriptCreateActivity(activity) {
+    return this.appsScriptAction('createActivity', activity, { method: 'POST' });
+  }
+
+  static appsScriptLikeActivity(userId, activityId) {
+    return this.appsScriptAction('likeActivity', { userId, activityId }, { method: 'POST' });
+  }
+
+  static appsScriptUnlikeActivity(userId, activityId) {
+    return this.appsScriptAction('unlikeActivity', { userId, activityId }, { method: 'POST' });
+  }
+
+  static appsScriptDeleteActivity(userId, activityId) {
+    return this.appsScriptAction('deleteActivity', { userId, activityId }, { method: 'POST' });
+  }
+
+  static normalizeAppsScriptUser(user = {}) {
+    return this.publicUser({
+      ...user,
+      role: user.role || 'teacher',
+      avatar_url: user.avatar_url || user.photo_url || '',
+      photo_url: user.photo_url || user.avatar_url || ''
+    });
+  }
+
+  static getStoredAppsScriptUser() {
+    return this.readStaticStore('user', null);
+  }
+
+  static requireAppsScriptUser() {
+    const user = this.getStoredAppsScriptUser();
+    if (!user?.id) throw API._makeHttpError(401, { error: 'Create an account first.' });
+    return user;
+  }
+
+  static async appsScriptRewardsForUser(userId) {
+    const rewards = await this.appsScriptGetRewards(userId);
+    const badges = (rewards.badges || []).map(badge => {
+      const id = String(badge.id || badge.medal_name || badge.name || 'medal');
+      const defined = this.staticBadgeDefinitions[id];
+      return defined
+        ? { ...defined, date: badge.date || badge.created_at || '' }
+        : {
+            id,
+            name: badge.name || id,
+            description: badge.description || 'Achievement unlocked.',
+            icon: badge.icon || 'Badge',
+            date: badge.date || ''
+          };
+    });
+    const points = Number(rewards.points || 0);
+    return {
+      userId,
+      points,
+      badges,
+      badgeIds: badges.map(badge => badge.id),
+      level: rewards.level || this.calculateLevel(points)
+    };
+  }
+
+  static async appsScriptRequest(endpoint, options = {}) {
+    const { path, query } = this.parseEndpoint(endpoint);
+    const method = String(options.method || 'GET').toUpperCase();
+    const body = this.parseRequestBody(options);
+
+    if (path === '/auth/register' && method === 'POST') {
+      const name = String(body.name || '').trim();
+      if (!name) throw API._makeHttpError(400, { error: 'Name is required' });
+      const created = await this.appsScriptCreateUser({
+        name,
+        bio: '',
+        photo_url: body.photo_url || ''
+      });
+      const user = this.normalizeAppsScriptUser({ ...created, email: body.email || '' });
+      return {
+        token: `apps-script-${user.id}-${Date.now()}`,
+        user
+      };
+    }
+
+    if (path === '/auth/login' && method === 'POST') {
+      const identifier = String(body.email || body.name || body.userId || '').trim().toLowerCase();
+      const users = await this.appsScriptGetUsers();
+      const user = (users || []).find(item => {
+        const name = String(item.name || '').trim().toLowerCase();
+        const id = String(item.id || '').trim().toLowerCase();
+        return identifier && (name === identifier || id === identifier);
+      });
+
+      if (!user) {
+        throw API._makeHttpError(404, {
+          error: 'User not found in Google Sheets. Use Create Account first, or log in with the exact name or user ID.'
+        });
+      }
+
+      return {
+        token: `apps-script-${user.id}-${Date.now()}`,
+        user: this.normalizeAppsScriptUser({ ...user, email: body.email || '' })
+      };
+    }
+
+    if (path === '/auth/profile' && method === 'GET') {
+      const stored = this.requireAppsScriptUser();
+      const latest = await this.appsScriptGetUser(stored.id);
+      return this.normalizeAppsScriptUser({ ...stored, ...(latest || {}) });
+    }
+
+    if (path === '/auth/profile' && method === 'PUT') {
+      const stored = this.requireAppsScriptUser();
+      const updated = await this.appsScriptUpdateUser({
+        userId: stored.id,
+        name: body.name ?? stored.name,
+        bio: body.bio ?? stored.bio ?? '',
+        photo_url: ''
+      });
+      return this.normalizeAppsScriptUser({ ...stored, ...body, ...updated });
+    }
+
+    const publicProfileMatch = path.match(/^\/users\/([^/]+)\/profile$/);
+    if (publicProfileMatch && method === 'GET') {
+      const user = await this.appsScriptGetUser(decodeURIComponent(publicProfileMatch[1]));
+      if (!user) throw API._makeHttpError(404, { error: 'User not found' });
+      return this.normalizeAppsScriptUser(user);
+    }
+
+    if (path === '/rewards' && method === 'GET') {
+      return this.appsScriptRewardsForUser(this.requireAppsScriptUser().id);
+    }
+
+    if (path === '/rewards/daily-bonus' && method === 'POST') {
+      return this.appsScriptClaimDailyBonus(this.requireAppsScriptUser().id);
+    }
+
+    if (path === '/rewards/leaderboard' && method === 'GET') {
+      const limit = parseInt(query.get('limit'), 10) || 10;
+      const leaderboard = await this.appsScriptGetLeaderboard(limit);
+      return { leaderboard };
+    }
+
+    if (path === '/notifications' && method === 'GET') {
+      const user = this.requireAppsScriptUser();
+      const limit = parseInt(query.get('limit'), 10) || 30;
+      const offset = parseInt(query.get('offset'), 10) || 0;
+      const allNotifications = (await this.appsScriptGetNotifications(user.id) || [])
+        .map(item => ({
+          ...item,
+          title: item.title || 'Notification',
+          type: item.type || 'info',
+          created_at: item.created_at || item.timestamp,
+          read: Boolean(item.read)
+        }));
+      return {
+        notifications: allNotifications.slice(offset, offset + limit),
+        unreadCount: allNotifications.filter(item => !item.read).length
+      };
+    }
+
+    if (path === '/notifications/unread-count' && method === 'GET') {
+      const { unreadCount } = await this.appsScriptRequest('/notifications');
+      return { unreadCount };
+    }
+
+    if (path === '/notifications/mark-all-read' && method === 'POST') {
+      const user = this.requireAppsScriptUser();
+      return this.appsScriptMarkAllNotificationsRead(user.id);
+    }
+
+    const notificationReadMatch = path.match(/^\/notifications\/([^/]+)\/read$/);
+    if (notificationReadMatch && method === 'POST') {
+      const user = this.requireAppsScriptUser();
+      await this.appsScriptMarkNotificationRead({
+        id: decodeURIComponent(notificationReadMatch[1]),
+        userId: user.id
+      });
+      return { updated: true };
+    }
+
+    if (path === '/lesson-plans/metadata/books' && method === 'GET') {
+      return this.staticRequest(endpoint, options);
+    }
+
+    const lessonMetadataMatch = path.match(/^\/lesson-plans\/metadata\/lessons\/([^/]+)$/);
+    if (lessonMetadataMatch && method === 'GET') {
+      return this.staticRequest(endpoint, options);
+    }
+
+    if (path === '/lesson-plans/generate' && method === 'POST') {
+      const user = this.requireAppsScriptUser();
+      const result = await this.staticRequest(endpoint, options);
+      if (result?.output) {
+        const saved = await this.appsScriptSaveClassPlan({
+          userId: user.id,
+          title: `Aula Turma ${new Date().toLocaleDateString('pt-BR')}`,
+          alunos_json: JSON.stringify({ alunos: this.extractStaticStudents(body.texto || body.rawInput || '') }),
+          output: result.output
+        });
+        return { ...result, saved: true, id: saved.id };
+      }
+      return result;
+    }
+
+    if (path === '/lesson-plans/save-class' && method === 'POST') {
+      const user = this.getStoredAppsScriptUser();
+      return this.appsScriptSaveClassPlan({
+        userId: user.id,
+        title: body.title,
+        alunos_json: body.alunos_json,
+        output: body.output
+      });
+    }
+
+    if (path === '/lesson-plans' && method === 'GET') {
+      const user = this.requireAppsScriptUser();
+      const limit = parseInt(query.get('limit'), 10) || 50;
+      const offset = parseInt(query.get('offset'), 10) || 0;
+      return this.appsScriptGetLessonPlans(user.id, limit, offset);
+    }
+
+    if (path === '/lesson-plans' && method === 'POST') {
+      const user = this.requireAppsScriptUser();
+      return this.appsScriptCreateLessonPlan({
+        userId: user.id,
+        studentName: body.studentName,
+        book: body.book,
+        lesson: body.lesson,
+        objectives: JSON.stringify(body.objectives || []),
+        checkTime: body.checkTime,
+        notes: body.notes
+      });
+    }
+
+    const lessonPlanMatch = path.match(/^\/lesson-plans\/([^/]+)$/);
+    if (lessonPlanMatch) {
+      const user = this.requireAppsScriptUser();
+      const id = decodeURIComponent(lessonPlanMatch[1]);
+      if (method === 'GET') return this.appsScriptGetLessonPlan(user.id, id);
+      if (method === 'DELETE') return this.appsScriptDeleteLessonPlan(user.id, id);
+      if (method === 'PUT') {
+        return this.appsScriptUpdateLessonPlan({
+          userId: user.id,
+          id,
+          studentName: body.studentName,
+          book: body.book,
+          lesson: body.lesson,
+          objectives: JSON.stringify(body.objectives || []),
+          checkTime: body.checkTime,
+          notes: body.notes
+        });
+      }
+    }
+
+    if (path === '/activities' && method === 'GET') {
+      const user = this.requireAppsScriptUser();
+      const limit = parseInt(query.get('limit'), 10) || 20;
+      const offset = parseInt(query.get('offset'), 10) || 0;
+      return this.appsScriptGetActivities(user.id, limit, offset);
+    }
+
+    const activitiesCategoryMatch = path.match(/^\/activities\/category\/([^/]+)$/);
+    if (activitiesCategoryMatch && method === 'GET') {
+      const user = this.requireAppsScriptUser();
+      const category = decodeURIComponent(activitiesCategoryMatch[1]);
+      const limit = parseInt(query.get('limit'), 10) || 20;
+      const offset = parseInt(query.get('offset'), 10) || 0;
+      return this.appsScriptGetActivitiesByCategory(user.id, category, limit, offset);
+    }
+
+    const activitiesUserMatch = path.match(/^\/activities\/user\/([^/]+)$/);
+    if (activitiesUserMatch && method === 'GET') {
+      const user = this.requireAppsScriptUser();
+      const targetUserId = decodeURIComponent(activitiesUserMatch[1]);
+      const limit = parseInt(query.get('limit'), 10) || 20;
+      const offset = parseInt(query.get('offset'), 10) || 0;
+      return this.appsScriptGetUserActivities(user.id, targetUserId, limit, offset);
+    }
+
+    const activityLikeMatch = path.match(/^\/activities\/([^/]+)\/(like|unlike)$/);
+    if (activityLikeMatch && method === 'POST') {
+      const user = this.requireAppsScriptUser();
+      const activityId = decodeURIComponent(activityLikeMatch[1]);
+      return activityLikeMatch[2] === 'like'
+        ? this.appsScriptLikeActivity(user.id, activityId)
+        : this.appsScriptUnlikeActivity(user.id, activityId);
+    }
+
+    const activityMatch = path.match(/^\/activities\/([^/]+)$/);
+    if (activityMatch && method === 'DELETE') {
+      const user = this.requireAppsScriptUser();
+      return this.appsScriptDeleteActivity(user.id, decodeURIComponent(activityMatch[1]));
+    }
+
+    return this.staticRequest(endpoint, options);
   }
 
   static readStaticStore(key, fallback) {
@@ -45,7 +499,13 @@ class API {
       id: user.id,
       name: user.name,
       email: user.email,
-      role: user.role || 'teacher'
+      role: user.role || 'teacher',
+      bio: user.bio || '',
+      location: user.location || '',
+      phone: user.phone || '',
+      specialties: user.specialties || '',
+      avatar_url: user.avatar_url || user.photo_url || '',
+      photo_url: user.photo_url || user.avatar_url || ''
     };
   }
 
@@ -61,6 +521,11 @@ class API {
         email: demoEmail,
         password: '123456789',
         role: 'teacher',
+        bio: '',
+        location: '',
+        phone: '',
+        specialties: '',
+        avatar_url: '',
         created_at: new Date().toISOString()
       });
       this.writeStaticStore(this.staticKeys.users, users);
@@ -103,11 +568,27 @@ class API {
     if (!token) return null;
 
     const storedUser = this.readStaticStore('user', null);
-    const users = this.readStaticStore(this.staticKeys.users, []);
-    return users.find(user =>
-      (storedUser?.id != null && Number(user.id) === Number(storedUser.id)) ||
+    let users = this.readStaticStore(this.staticKeys.users, []);
+    let current = users.find(user =>
+      (storedUser?.id != null && String(user.id) === String(storedUser.id)) ||
       (storedUser?.email && String(user.email).toLowerCase() === String(storedUser.email).toLowerCase())
-    ) || null;
+    );
+
+    if (!current && this.isAppsScriptMode && storedUser?.id != null) {
+      current = {
+        id: storedUser.id,
+        name: storedUser.name || 'Teacher',
+        email: storedUser.email || '',
+        role: storedUser.role || 'teacher',
+        bio: storedUser.bio || '',
+        avatar_url: storedUser.avatar_url || storedUser.photo_url || '',
+        created_at: storedUser.created_at || new Date().toISOString()
+      };
+      users.push(current);
+      this.writeStaticStore(this.staticKeys.users, users);
+    }
+
+    return current || null;
   }
 
   static requireStaticUser() {
@@ -133,12 +614,64 @@ class API {
     return rewards[userId];
   }
 
+  static decorateStaticBadges(badges) {
+    return (badges || []).map(badge => {
+      const id = typeof badge === 'string' ? badge : badge.id;
+      return this.staticBadgeDefinitions[id] || { id, name: id, description: 'Custom achievement.', icon: 'Badge' };
+    });
+  }
+
+  static createStaticNotification(userId, type, title, message, metadata = {}) {
+    const notifications = this.readStaticStore(this.staticKeys.notifications, []);
+    notifications.unshift({
+      id: this.nextStaticId(notifications),
+      user_id: userId,
+      type,
+      title,
+      message,
+      metadata,
+      read_at: '',
+      created_at: new Date().toISOString()
+    });
+    this.writeStaticStore(this.staticKeys.notifications, notifications);
+  }
+
+  static addStaticBadge(userId, badgeId) {
+    const rewards = this.readStaticStore(this.staticKeys.rewards, {});
+    const current = rewards[userId] || { userId, points: 0, badges: [], last_bonus_date: '' };
+    const ids = current.badges.map(badge => typeof badge === 'string' ? badge : badge.id).filter(Boolean);
+    if (!ids.includes(badgeId)) {
+      current.badges = [...ids, badgeId];
+      rewards[userId] = current;
+      this.writeStaticStore(this.staticKeys.rewards, rewards);
+      const badge = this.staticBadgeDefinitions[badgeId] || { name: badgeId, description: 'New badge unlocked.' };
+      this.createStaticNotification(userId, 'badge', `New badge: ${badge.name}`, badge.description, { badgeId });
+    }
+  }
+
+  static evaluateStaticBadges(userId, reason = '') {
+    const user = this.readStaticStore(this.staticKeys.users, []).find(item => String(item.id) === String(userId));
+    const reward = this.getStaticRewards(userId);
+    const points = Number(reward.points || 0);
+    if (reason === 'first_lesson') this.addStaticBadge(userId, 'first_lesson');
+    if (reason === 'first_post') this.addStaticBadge(userId, 'first_post');
+    if (reason === 'first_like_given') this.addStaticBadge(userId, 'first_like_given');
+    if (reason === 'first_like_received') this.addStaticBadge(userId, 'first_like_received');
+    if (reason === 'daily_bonus') this.addStaticBadge(userId, 'daily_bonus');
+    if (user?.bio && user?.avatar_url) this.addStaticBadge(userId, 'profile_complete');
+    if (points >= 50) this.addStaticBadge(userId, 'points_50');
+    if (points >= 150) this.addStaticBadge(userId, 'points_150');
+    if (points >= 300) this.addStaticBadge(userId, 'points_300');
+    if (points >= 500) this.addStaticBadge(userId, 'points_500');
+  }
+
   static awardStaticPoints(userId, points) {
     const rewards = this.readStaticStore(this.staticKeys.rewards, {});
     const current = rewards[userId] || { userId, points: 0, badges: [], last_bonus_date: '' };
     current.points = Number(current.points || 0) + points;
     rewards[userId] = current;
     this.writeStaticStore(this.staticKeys.rewards, rewards);
+    this.evaluateStaticBadges(userId);
     return { awarded: true, points };
   }
 
@@ -324,24 +857,29 @@ class API {
     plans.unshift(plan);
     this.writeStaticStore(this.staticKeys.lessonPlans, plans);
     this.awardStaticPoints(userId, 20);
+    this.evaluateStaticBadges(userId, 'first_lesson');
     return { id: plan.id, title: plan.student_name, type: 'class' };
   }
 
   static getStaticLessonPlansForUser(userId, limit = 50, offset = 0) {
     return this.readStaticStore(this.staticKeys.lessonPlans, [])
-      .filter(plan => Number(plan.user_id) === Number(userId))
+      .filter(plan => String(plan.user_id) === String(userId))
       .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
       .slice(offset, offset + limit);
   }
 
   static toStaticActivityResponse(activity, currentUserId) {
     const users = this.readStaticStore(this.staticKeys.users, []);
-    const creator = users.find(user => Number(user.id) === Number(activity.created_by));
+    const creator = users.find(user => String(user.id) === String(activity.created_by));
     const likedBy = Array.isArray(activity.likedBy) ? activity.likedBy : [];
     return {
       ...activity,
       creator_name: creator?.name || 'Teacher',
-      likedByCurrentUser: likedBy.some(id => Number(id) === Number(currentUserId))
+      creator_bio: creator?.bio || '',
+      creator_location: creator?.location || '',
+      creator_specialties: creator?.specialties || '',
+      creator_avatar_url: creator?.avatar_url || '',
+      likedByCurrentUser: likedBy.some(id => String(id) === String(currentUserId))
     };
   }
 
@@ -395,6 +933,33 @@ class API {
 
     if (path === '/auth/profile' && method === 'GET') {
       return this.publicUser(this.requireStaticUser());
+    }
+
+    if (path === '/auth/profile' && method === 'PUT') {
+      const current = this.requireStaticUser();
+      const users = this.readStaticStore(this.staticKeys.users, []);
+      const index = users.findIndex(user => String(user.id) === String(current.id));
+      users[index] = {
+        ...users[index],
+        name: String(body.name || current.name || '').trim(),
+        bio: String(body.bio || '').trim(),
+        location: String(body.location || '').trim(),
+        phone: String(body.phone || '').trim(),
+        specialties: String(body.specialties || '').trim()
+      };
+      this.writeStaticStore(this.staticKeys.users, users);
+      this.evaluateStaticBadges(current.id, 'profile_update');
+      return this.publicUser(users[index]);
+    }
+
+    const publicProfileMatch = path.match(/^\/users\/([^/]+)\/profile$/);
+    if (publicProfileMatch && method === 'GET') {
+      this.requireStaticUser();
+      const users = this.readStaticStore(this.staticKeys.users, []);
+      const user = users.find(item => String(item.id) === decodeURIComponent(publicProfileMatch[1]));
+      if (!user) throw API._makeHttpError(404, { error: 'User not found' });
+      const { email, password, phone, ...publicUser } = user;
+      return publicUser;
     }
 
     if (path === '/lesson-plans/metadata/books' && method === 'GET') {
@@ -493,7 +1058,7 @@ class API {
       const user = this.requireStaticUser();
       const planId = Number(lessonPlanMatch[1]);
       const plans = this.readStaticStore(this.staticKeys.lessonPlans, []);
-      const index = plans.findIndex(plan => Number(plan.id) === planId && Number(plan.user_id) === Number(user.id));
+      const index = plans.findIndex(plan => Number(plan.id) === planId && String(plan.user_id) === String(user.id));
       if (index === -1) throw API._makeHttpError(404, { error: 'Lesson plan not found' });
 
       if (method === 'GET') return plans[index];
@@ -524,7 +1089,8 @@ class API {
       return {
         userId: user.id,
         points: Number(rewards.points || 0),
-        badges: Array.isArray(rewards.badges) ? rewards.badges : [],
+        badges: this.decorateStaticBadges(Array.isArray(rewards.badges) ? rewards.badges : []),
+        badgeIds: Array.isArray(rewards.badges) ? rewards.badges.map(badge => typeof badge === 'string' ? badge : badge.id) : [],
         level: this.calculateLevel(Number(rewards.points || 0))
       };
     }
@@ -541,7 +1107,49 @@ class API {
       current.last_bonus_date = today;
       rewards[user.id] = current;
       this.writeStaticStore(this.staticKeys.rewards, rewards);
+      this.evaluateStaticBadges(user.id, 'daily_bonus');
       return { bonusAwarded: true, points: 5 };
+    }
+
+    if (path === '/notifications' && method === 'GET') {
+      const user = this.requireStaticUser();
+      const limit = parseInt(query.get('limit'), 10) || 30;
+      const offset = parseInt(query.get('offset'), 10) || 0;
+      const allNotifications = this.readStaticStore(this.staticKeys.notifications, [])
+        .filter(item => String(item.user_id) === String(user.id));
+      return {
+        notifications: allNotifications.slice(offset, offset + limit).map(item => ({ ...item, read: Boolean(item.read_at) })),
+        unreadCount: allNotifications.filter(item => !item.read_at).length
+      };
+    }
+
+    if (path === '/notifications/unread-count' && method === 'GET') {
+      const user = this.requireStaticUser();
+      const unreadCount = this.readStaticStore(this.staticKeys.notifications, [])
+        .filter(item => String(item.user_id) === String(user.id) && !item.read_at).length;
+      return { unreadCount };
+    }
+
+    if (path === '/notifications/mark-all-read' && method === 'POST') {
+      const user = this.requireStaticUser();
+      const notifications = this.readStaticStore(this.staticKeys.notifications, []);
+      notifications.forEach(item => {
+        if (String(item.user_id) === String(user.id) && !item.read_at) item.read_at = new Date().toISOString();
+      });
+      this.writeStaticStore(this.staticKeys.notifications, notifications);
+      return { updated: true };
+    }
+
+    const notificationReadMatch = path.match(/^\/notifications\/(\d+)\/read$/);
+    if (notificationReadMatch && method === 'POST') {
+      const user = this.requireStaticUser();
+      const notifications = this.readStaticStore(this.staticKeys.notifications, []);
+      const notification = notifications.find(item =>
+        Number(item.id) === Number(notificationReadMatch[1]) && String(item.user_id) === String(user.id)
+      );
+      if (notification) notification.read_at = new Date().toISOString();
+      this.writeStaticStore(this.staticKeys.notifications, notifications);
+      return { updated: Boolean(notification) };
     }
 
     if (path === '/rewards/leaderboard' && method === 'GET') {
@@ -550,12 +1158,17 @@ class API {
       const users = this.readStaticStore(this.staticKeys.users, []);
       const rewards = this.readStaticStore(this.staticKeys.rewards, {});
       const leaderboard = users.map(user => {
-        const points = Number(rewards[user.id]?.points || 0);
+        const reward = rewards[user.id] || {};
+        const points = Number(reward.points || 0);
         return {
           id: user.id,
           name: user.name,
+          bio: user.bio || '',
+          location: user.location || '',
+          specialties: user.specialties || '',
           points,
-          level: this.calculateLevel(points)
+          level: this.calculateLevel(points),
+          badges: this.decorateStaticBadges(reward.badges || [])
         };
       }).sort((a, b) => b.points - a.points).slice(0, limit).map((entry, index) => ({
         rank: index + 1,
@@ -585,14 +1198,14 @@ class API {
         .map(activity => this.toStaticActivityResponse(activity, user.id));
     }
 
-    const activitiesUserMatch = path.match(/^\/activities\/user\/(\d+)$/);
+    const activitiesUserMatch = path.match(/^\/activities\/user\/([^/]+)$/);
     if (activitiesUserMatch && method === 'GET') {
       const user = this.requireStaticUser();
-      const targetUserId = Number(activitiesUserMatch[1]);
+      const targetUserId = decodeURIComponent(activitiesUserMatch[1]);
       const limit = parseInt(query.get('limit'), 10) || 20;
       const offset = parseInt(query.get('offset'), 10) || 0;
       return this.readStaticStore(this.staticKeys.activities, [])
-        .filter(activity => Number(activity.created_by) === targetUserId)
+        .filter(activity => String(activity.created_by) === String(targetUserId))
         .slice(offset, offset + limit)
         .map(activity => this.toStaticActivityResponse(activity, user.id));
     }
@@ -607,13 +1220,25 @@ class API {
       if (!activity) throw API._makeHttpError(404, { error: 'Activity not found' });
 
       activity.likedBy = Array.isArray(activity.likedBy) ? activity.likedBy : [];
-      const alreadyLiked = activity.likedBy.some(id => Number(id) === Number(user.id));
+      const alreadyLiked = activity.likedBy.some(id => String(id) === String(user.id));
       if (action === 'like' && !alreadyLiked) activity.likedBy.push(user.id);
       if (action === 'unlike' && alreadyLiked) {
-        activity.likedBy = activity.likedBy.filter(id => Number(id) !== Number(user.id));
+        activity.likedBy = activity.likedBy.filter(id => String(id) !== String(user.id));
       }
       activity.likes = activity.likedBy.length;
       this.writeStaticStore(this.staticKeys.activities, activities);
+      if (action === 'like' && !alreadyLiked && String(activity.created_by) !== String(user.id)) {
+        const likerName = user.name || 'A teacher';
+        this.createStaticNotification(
+          activity.created_by,
+          'like',
+          'New like on your activity',
+          `${likerName} liked "${activity.title}".`,
+          { activityId: activity.id, likerId: user.id }
+        );
+        this.evaluateStaticBadges(activity.created_by, 'first_like_received');
+        this.evaluateStaticBadges(user.id, 'first_like_given');
+      }
       return action === 'like' ? { liked: !alreadyLiked } : { unliked: alreadyLiked };
     }
 
@@ -623,7 +1248,7 @@ class API {
       const activityId = Number(activityMatch[1]);
       const activities = this.readStaticStore(this.staticKeys.activities, []);
       const index = activities.findIndex(activity =>
-        Number(activity.id) === activityId && Number(activity.created_by) === Number(user.id)
+        Number(activity.id) === activityId && String(activity.created_by) === String(user.id)
       );
       if (index === -1) throw API._makeHttpError(404, { error: 'Activity not found' });
       activities.splice(index, 1);
@@ -660,7 +1285,29 @@ class API {
     activities.unshift(activity);
     this.writeStaticStore(this.staticKeys.activities, activities);
     this.awardStaticPoints(user.id, 20);
+    this.evaluateStaticBadges(user.id, 'first_post');
     return this.toStaticActivityResponse(activity, user.id);
+  }
+
+  static async staticUploadProfileAvatar(formData) {
+    const user = this.requireStaticUser();
+    const file = formData.get('avatar');
+    if (!file) throw API._makeHttpError(400, { error: 'No image provided' });
+
+    const buffer = await file.arrayBuffer();
+    const bytes = new Uint8Array(buffer);
+    let binary = '';
+    bytes.forEach(byte => {
+      binary += String.fromCharCode(byte);
+    });
+    const dataUrl = `data:${file.type || 'image/jpeg'};base64,${btoa(binary)}`;
+
+    const users = this.readStaticStore(this.staticKeys.users, []);
+    const index = users.findIndex(item => String(item.id) === String(user.id));
+    users[index] = { ...users[index], avatar_url: dataUrl };
+    this.writeStaticStore(this.staticKeys.users, users);
+    this.evaluateStaticBadges(user.id, 'profile_update');
+    return this.publicUser(users[index]);
   }
 
   /** Used by auth/session recovery so callers can distinguish 401 from offline errors */
@@ -674,6 +1321,18 @@ class API {
   }
 
   static async request(endpoint, options = {}) {
+    if (this.isAppsScriptMode) {
+      try {
+        return await this.appsScriptRequest(endpoint, options);
+      } catch (err) {
+        if (err.status === 401) {
+          localStorage.removeItem('token');
+          localStorage.removeItem('user');
+        }
+        throw err;
+      }
+    }
+
     if (this.isStaticMode) {
       try {
         return await this.staticRequest(endpoint, options);
@@ -711,7 +1370,7 @@ class API {
       if (response.status === 401) {
         localStorage.removeItem('token');
         localStorage.removeItem('user');
-        if (window.location.pathname !== '/') window.location.href = '/';
+        window.location.href = new URL('./', window.location.href).href;
       }
       throw err;
     }
@@ -742,6 +1401,42 @@ class API {
 
   static getProfile() {
     return this.request('/auth/profile');
+  }
+
+  static updateProfile(profile) {
+    return this.request('/auth/profile', {
+      method: 'PUT',
+      body: JSON.stringify(profile)
+    });
+  }
+
+  static uploadProfileAvatar(formData) {
+    if (this.isAppsScriptMode) {
+      throw new Error('Paste the public Google Drive image URL in Profile photo URL and save the profile.');
+    }
+
+    if (this.isStaticMode) {
+      return this.staticUploadProfileAvatar(formData);
+    }
+
+    const token = localStorage.getItem('token');
+    return fetch(`${API_BASE}/auth/profile/avatar`, {
+      method: 'POST',
+      headers: {
+        ...(token && { Authorization: `Bearer ${token}` })
+      },
+      body: formData
+    }).then(async (res) => {
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw API._makeHttpError(res.status, body);
+      }
+      return res.json();
+    });
+  }
+
+  static getPublicProfile(userId) {
+    return this.request(`/users/${userId}/profile`);
   }
 
   // Lesson plan endpoints
@@ -810,6 +1505,27 @@ class API {
     return this.request(`/rewards/leaderboard?limit=${limit}`);
   }
 
+  // Notification endpoints
+  static getNotifications(limit = 30, offset = 0) {
+    return this.request(`/notifications?limit=${limit}&offset=${offset}`);
+  }
+
+  static getUnreadNotificationsCount() {
+    return this.request('/notifications/unread-count');
+  }
+
+  static markNotificationRead(notificationId) {
+    return this.request(`/notifications/${notificationId}/read`, {
+      method: 'POST'
+    });
+  }
+
+  static markAllNotificationsRead() {
+    return this.request('/notifications/mark-all-read', {
+      method: 'POST'
+    });
+  }
+
   // Activity endpoints
   static getActivities(limit = 20, offset = 0) {
     return this.request(`/activities?limit=${limit}&offset=${offset}`);
@@ -824,6 +1540,19 @@ class API {
   }
 
   static uploadActivity(formData) {
+    if (this.isAppsScriptMode) {
+      const user = this.requireAppsScriptUser();
+      return this.appsScriptCreateActivity({
+        userId: user.id,
+        title: String(formData.get('title') || '').trim(),
+        description: String(formData.get('description') || '').trim(),
+        category: String(formData.get('category') || 'general'),
+        file_url: String(formData.get('file_url') || '').trim(),
+        file_name: String(formData.get('file_name') || '').trim(),
+        file_type: String(formData.get('file_type') || '').trim()
+      });
+    }
+
     if (this.isStaticMode) {
       return this.staticUploadActivity(formData);
     }

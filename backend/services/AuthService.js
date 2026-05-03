@@ -1,20 +1,14 @@
-import sqlite3 from 'sqlite3';
 import bcryptjs from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
 import dotenv from 'dotenv';
+import { openDatabase } from '../database/client.js';
+import RewardService from './RewardService.js';
 
 dotenv.config();
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-const dbPath = join(__dirname, '../../database/database.db');
-
 export class AuthService {
   constructor() {
-    this.db = new sqlite3.Database(dbPath);
+    this.db = openDatabase();
   }
 
   /**
@@ -36,7 +30,7 @@ export class AuthService {
         [String(name).trim(), emailNorm, hashedPassword, role],
         function(err) {
           if (err) {
-            if (err.message.includes('UNIQUE constraint failed')) {
+            if (err.code === '23505' || err.message.includes('UNIQUE constraint failed')) {
               reject(new Error('Email already registered'));
             } else {
               reject(err);
@@ -102,7 +96,11 @@ export class AuthService {
               id: user.id,
               name: user.name,
               email: user.email,
-              role: user.role
+              role: user.role,
+              bio: user.bio || '',
+              location: user.location || '',
+              phone: user.phone || '',
+              specialties: user.specialties || ''
             }
           });
         }
@@ -116,7 +114,10 @@ export class AuthService {
   async getUserById(userId) {
     return new Promise((resolve, reject) => {
       this.db.get(
-        `SELECT id, name, email, role, created_at FROM users WHERE id = ?`,
+        `SELECT id, name, email, role, bio, location, phone, specialties,
+                CASE WHEN avatar_data IS NULL THEN 0 ELSE 1 END as has_avatar,
+                updated_at, created_at
+         FROM users WHERE id = ?`,
         [userId],
         (err, user) => {
           if (err) reject(err);
@@ -124,6 +125,105 @@ export class AuthService {
         }
       );
     });
+  }
+
+  async getPublicUserById(userId) {
+    return new Promise((resolve, reject) => {
+      this.db.get(
+        `SELECT id, name, role, bio, location, specialties,
+                CASE WHEN avatar_data IS NULL THEN 0 ELSE 1 END as has_avatar,
+                created_at
+         FROM users WHERE id = ?`,
+        [userId],
+        (err, user) => {
+          if (err) reject(err);
+          else resolve(user || null);
+        }
+      );
+    });
+  }
+
+  async updateProfile(userId, updates) {
+    const allowed = {
+      name: updates.name,
+      bio: updates.bio,
+      location: updates.location,
+      phone: updates.phone,
+      specialties: updates.specialties
+    };
+
+    const next = Object.fromEntries(
+      Object.entries(allowed).map(([key, value]) => [key, value == null ? '' : String(value).trim()])
+    );
+
+    if (!next.name) {
+      throw new Error('Name is required');
+    }
+
+    await new Promise((resolve, reject) => {
+      this.db.run(
+        `UPDATE users
+         SET name = ?, bio = ?, location = ?, phone = ?, specialties = ?, updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+        [next.name, next.bio, next.location, next.phone, next.specialties, userId],
+        function(err) {
+          if (err) reject(err);
+          else resolve(this);
+        }
+      );
+    });
+
+    await this.evaluateProfileBadges(userId);
+    return this.getUserById(userId);
+  }
+
+  async updateAvatar(userId, file) {
+    if (!file || !file.data) {
+      throw new Error('No image provided');
+    }
+
+    const mime = String(file.mimetype || '');
+    if (!mime.startsWith('image/')) {
+      throw new Error('Profile photo must be an image');
+    }
+
+    await new Promise((resolve, reject) => {
+      this.db.run(
+        `UPDATE users
+         SET avatar_data = ?, avatar_type = ?, updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+        [file.data.toString('base64'), mime, userId],
+        function(err) {
+          if (err) reject(err);
+          else resolve(this);
+        }
+      );
+    });
+
+    await this.evaluateProfileBadges(userId);
+    return this.getUserById(userId);
+  }
+
+  async getUserAvatar(userId) {
+    return new Promise((resolve, reject) => {
+      this.db.get(
+        `SELECT avatar_data, avatar_type FROM users WHERE id = ?`,
+        [userId],
+        (err, row) => {
+          if (err) reject(err);
+          else resolve(row || null);
+        }
+      );
+    });
+  }
+
+  async evaluateProfileBadges(userId) {
+    const rewards = new RewardService();
+    try {
+      await rewards.evaluateBadges(userId, 'profile_update');
+    } finally {
+      rewards.close();
+    }
   }
 
   /**

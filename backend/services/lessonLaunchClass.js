@@ -1,10 +1,5 @@
-import sqlite3 from "sqlite3";
-import { join, dirname } from "path";
-import { fileURLToPath } from "url";
 import RewardService from "./RewardService.js";
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const dbPath = join(__dirname, "../../database/database.db");
+import { openDatabase } from "../database/client.js";
 
 const POINTS_PER_CLASS = 10;
 
@@ -16,7 +11,7 @@ const POINTS_PER_CLASS = 10;
  */
 export function launchClass(planningOutput, alunos, professorUserId) {
   return new Promise((resolve, reject) => {
-    const db = new sqlite3.Database(dbPath);
+    const db = openDatabase();
     db.run(
       `INSERT INTO planner_launches (user_id, planning_output, alunos_json) VALUES (?, ?, ?)`,
       [professorUserId, planningOutput, JSON.stringify(alunos)],

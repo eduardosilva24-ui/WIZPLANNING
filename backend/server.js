@@ -10,6 +10,9 @@ import authRoutes from './routes/auth.js';
 import lessonPlanRoutes from './routes/lessonPlan.js';
 import rewardRoutes from './routes/reward.js';
 import activityRoutes from './routes/activity.js';
+import notificationRoutes from './routes/notification.js';
+import { activityController } from './controllers/activityController.js';
+import { authController } from './controllers/authController.js';
 
 import { authMiddleware, errorHandler } from './middleware/auth.js';
 import { ensureDatabaseSchema } from './database/ensureSchema.js';
@@ -22,6 +25,9 @@ const __dirname = dirname(__filename);
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(',').map((origin) => origin.trim()).filter(Boolean)
+  : null;
 
 if (process.env.TRUST_PROXY === '1') {
   app.set('trust proxy', 1);
@@ -30,7 +36,7 @@ if (process.env.TRUST_PROXY === '1') {
 // Middleware
 app.use(express.json());
 app.use(cors({
-  origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : true,
+  origin: allowedOrigins || true,
   credentials: true
 }));
 app.use(fileUpload());
@@ -45,9 +51,13 @@ app.get('/api/health', (req, res) => {
 });
 
 // Routes
+app.get('/api/users/:userId/avatar', authController.getUserAvatar);
+app.get('/api/users/:userId/profile', authMiddleware, authController.getPublicProfile);
 app.use('/api/auth', authRoutes);
 app.use('/api/lesson-plans', authMiddleware, lessonPlanRoutes);
 app.use('/api/rewards', authMiddleware, rewardRoutes);
+app.use('/api/notifications', authMiddleware, notificationRoutes);
+app.get('/api/activities/:activityId/file', activityController.downloadActivityFile);
 app.use('/api/activities', authMiddleware, activityRoutes);
 
 // 404 for unmatched API routes

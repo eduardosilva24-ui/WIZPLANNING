@@ -15,32 +15,34 @@ class Community {
     const title = document.getElementById('activityTitle').value;
     const description = document.getElementById('activityDescription').value;
     const category = document.getElementById('activityCategory').value;
-    const fileInput = document.getElementById('activityFile');
+    const fileUrl = document.getElementById('activityFileUrl')?.value.trim() || '';
     const submitBtn = e.target.querySelector('button[type="submit"]');
 
-    if (!title || !fileInput.files.length) {
-      window.UI?.showToast('Please fill in title and select a file', 'error');
+    if (!title) {
+      window.UI?.showToast('Please fill in the activity title', 'error');
       return;
     }
 
     try {
-      window.UI?.setButtonLoading(submitBtn, true, 'Uploading...');
+      window.UI?.setButtonLoading(submitBtn, true, 'Sharing...');
       const formData = new FormData();
       formData.append('title', title);
       formData.append('description', description);
       formData.append('category', category);
-      formData.append('file', fileInput.files[0]);
+      formData.append('file_url', fileUrl);
+      formData.append('file_name', fileUrl ? 'Shared material' : '');
 
       await window.API.uploadActivity(formData);
 
-      window.UI?.showToast('Activity uploaded successfully (+20 points)', 'success');
+      window.UI?.showToast('Activity shared successfully (+20 points)', 'success');
       document.getElementById('uploadForm').reset();
 
       await this.loadActivities();
       if (window.Rewards) await window.Rewards.refreshRewards();
       if (window.Dashboard) await window.Dashboard.loadDashboardData(true);
+      await window.Notifications?.refreshUnreadCount?.();
     } catch (error) {
-      window.UI?.showToast(`Upload failed: ${error.message}`, 'error');
+      window.UI?.showToast(`Share failed: ${error.message}`, 'error');
     } finally {
       window.UI?.setButtonLoading(submitBtn, false);
     }
@@ -78,6 +80,24 @@ class Community {
       const card = document.createElement('article');
       card.className = 'activity-card card';
 
+      const authorBlock = document.createElement('button');
+      authorBlock.type = 'button';
+      authorBlock.className = 'activity-author';
+      authorBlock.addEventListener('click', () => this.openTeacherProfile(activity.created_by));
+
+      const avatar = document.createElement('span');
+      avatar.className = 'activity-avatar';
+      if (activity.creator_avatar_url) {
+        avatar.style.backgroundImage = `url("${activity.creator_avatar_url}")`;
+      } else {
+        avatar.textContent = (activity.creator_name || 'T').slice(0, 1).toUpperCase();
+      }
+
+      const authorText = document.createElement('span');
+      authorText.className = 'activity-author-text';
+      authorText.textContent = activity.creator_name || 'Teacher';
+      authorBlock.append(avatar, authorText);
+
       const title = document.createElement('h3');
       title.textContent = activity.title || 'Untitled activity';
 
@@ -88,9 +108,9 @@ class Community {
       category.className = 'activity-category';
       category.textContent = activity.category || 'general';
 
-      card.append(title, description, category);
+      card.append(authorBlock, title, description, category);
 
-      if (typeof activity.file_url === 'string' && activity.file_url.startsWith('/uploads/')) {
+      if (typeof activity.file_url === 'string' && activity.file_url) {
         const link = document.createElement('a');
         link.className = 'activity-link';
         link.href = activity.file_url;
@@ -105,7 +125,7 @@ class Community {
 
       const author = document.createElement('span');
       const date = activity.created_at ? new Date(activity.created_at).toLocaleDateString() : '';
-      author.textContent = `${activity.creator_name || 'Teacher'} · ${date}`;
+      author.textContent = `${activity.creator_name || 'Teacher'} | ${date}`;
 
       const likeBtn = document.createElement('button');
       likeBtn.className = `like-btn ${activity.likedByCurrentUser ? 'liked' : ''}`;
@@ -123,6 +143,59 @@ class Community {
       card.appendChild(meta);
       container.appendChild(card);
     });
+  }
+
+  static async openTeacherProfile(userId) {
+    if (!userId) return;
+
+    try {
+      const profile = await window.API.getPublicProfile(userId);
+      const modal = document.createElement('div');
+      modal.className = 'modal-overlay';
+
+      const content = document.createElement('div');
+      content.className = 'modal-content teacher-profile-modal';
+
+      const header = document.createElement('div');
+      header.className = 'teacher-profile-header';
+
+      const avatar = document.createElement('span');
+      avatar.className = 'teacher-profile-avatar';
+      if (profile.avatar_url) {
+        avatar.style.backgroundImage = `url("${profile.avatar_url}")`;
+      } else {
+        avatar.textContent = (profile.name || 'T').slice(0, 1).toUpperCase();
+      }
+
+      const titleWrap = document.createElement('div');
+      const title = document.createElement('h3');
+      title.textContent = profile.name || 'Teacher';
+      const meta = document.createElement('p');
+      meta.textContent = [profile.location, profile.specialties].filter(Boolean).join(' | ') || profile.role || 'Teacher';
+      titleWrap.append(title, meta);
+      header.append(avatar, titleWrap);
+
+      const bio = document.createElement('p');
+      bio.className = 'teacher-profile-bio';
+      bio.textContent = profile.bio || 'No bio yet.';
+
+      const actions = document.createElement('div');
+      actions.className = 'modal-actions';
+      const close = document.createElement('button');
+      close.type = 'button';
+      close.textContent = 'Close';
+      close.addEventListener('click', () => modal.remove());
+      actions.appendChild(close);
+
+      content.append(header, bio, actions);
+      modal.appendChild(content);
+      modal.addEventListener('click', e => {
+        if (e.target.classList.contains('modal-overlay')) modal.remove();
+      });
+      document.body.append(modal);
+    } catch (error) {
+      window.UI?.showToast(`Could not load profile: ${error.message}`, 'error');
+    }
   }
 
   static async toggleLike(btn) {
@@ -143,6 +216,7 @@ class Community {
       const nextLikes = isLiked ? Math.max(0, currentLikes - 1) : currentLikes + 1;
       btn.dataset.likes = String(nextLikes);
       btn.textContent = `${isLiked ? 'Like' : 'Liked'} ${nextLikes}`;
+      await window.Notifications?.refreshUnreadCount?.();
     } catch (error) {
       window.UI?.showToast(`Action failed: ${error.message}`, 'error');
     }

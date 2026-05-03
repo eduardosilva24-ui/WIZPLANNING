@@ -51,7 +51,9 @@ class Dashboard {
       dashboard: 'dashboardPage',
       'lesson-planner': 'lessonPlannerPage',
       community: 'communityPage',
-      rewards: 'rewardsPage'
+      rewards: 'rewardsPage',
+      notifications: 'notificationsPage',
+      profile: 'profilePage'
     };
 
     document.querySelectorAll('.page-content').forEach(page => page.classList.remove('active'));
@@ -72,6 +74,10 @@ class Dashboard {
       else if (pageName === 'rewards') {
         window.Rewards?.refreshRewards?.();
         window.Rewards?.loadLeaderboard?.();
+      } else if (pageName === 'notifications') {
+        window.Notifications?.loadNotifications?.();
+      } else if (pageName === 'profile') {
+        window.Profile?.loadProfile?.();
       }
     }, 50);
   }

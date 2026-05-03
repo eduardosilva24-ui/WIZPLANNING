@@ -1,31 +1,32 @@
-import sqlite3 from 'sqlite3';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
+import { openDatabase } from '../database/client.js';
+import RewardService from './RewardService.js';
+import NotificationService from './NotificationService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const dbPath = path.join(__dirname, '../../database/database.db');
 const uploadsDir = path.join(__dirname, '../../uploads');
 
 export class ActivityService {
   constructor() {
-    this.db = new sqlite3.Database(dbPath);
+    this.db = openDatabase();
   }
 
   /**
    * Create a new activity (file upload)
    */
-  async createActivity(userId, title, description, filePath, fileType, category = 'general') {
+  async createActivity(userId, title, description, filePath, fileType, category = 'general', fileName = '', fileData = '', fileSize = 0) {
     return new Promise((resolve, reject) => {
       const db = this.db;
 
       db.run(
-        `INSERT INTO activities (title, description, file_path, file_type, created_by, category)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [title, description, filePath, fileType, userId, category],
+        `INSERT INTO activities (title, description, file_path, file_name, file_type, file_data, file_size, created_by, category)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [title, description, filePath, fileName, fileType, fileData, fileSize, userId, category],
         function(err) {
           if (err) {
             reject(err);
@@ -34,16 +35,12 @@ export class ActivityService {
 
           const activityId = this.lastID;
 
-          // Award points for uploading activity
-          db.run(
-            `UPDATE rewards SET points = points + 20 WHERE user_id = ?`,
-            [userId],
-            (err) => {
-              if (err) console.error('Error awarding points:', err);
-            }
-          );
-
-          resolve({ id: activityId, title, description, fileType });
+          const rewards = new RewardService();
+          rewards
+            .awardPoints(userId, 20, 'activity_upload')
+            .then(() => resolve({ id: activityId, title, description, filePath, fileName, fileType, fileSize }))
+            .catch(reject)
+            .finally(() => rewards.close());
         }
       );
     });
@@ -55,7 +52,11 @@ export class ActivityService {
   async getActivities(limit = 20, offset = 0) {
     return new Promise((resolve, reject) => {
       this.db.all(
-        `SELECT a.*, u.name as creator_name FROM activities a
+        `SELECT a.id, a.title, a.description, a.file_path, a.file_name, a.file_type, a.file_size,
+                a.created_by, a.category, a.likes, a.created_at, u.name as creator_name,
+                u.bio as creator_bio, u.location as creator_location, u.specialties as creator_specialties,
+                CASE WHEN u.avatar_data IS NULL THEN 0 ELSE 1 END as creator_has_avatar
+         FROM activities a
          JOIN users u ON a.created_by = u.id
          ORDER BY a.created_at DESC
          LIMIT ? OFFSET ?`,
@@ -74,7 +75,11 @@ export class ActivityService {
   async getActivitiesByCategory(category, limit = 20, offset = 0) {
     return new Promise((resolve, reject) => {
       this.db.all(
-        `SELECT a.*, u.name as creator_name FROM activities a
+        `SELECT a.id, a.title, a.description, a.file_path, a.file_name, a.file_type, a.file_size,
+                a.created_by, a.category, a.likes, a.created_at, u.name as creator_name,
+                u.bio as creator_bio, u.location as creator_location, u.specialties as creator_specialties,
+                CASE WHEN u.avatar_data IS NULL THEN 0 ELSE 1 END as creator_has_avatar
+         FROM activities a
          JOIN users u ON a.created_by = u.id
          WHERE a.category = ?
          ORDER BY a.created_at DESC
@@ -94,7 +99,11 @@ export class ActivityService {
   async getActivitiesByUser(userId, limit = 20, offset = 0) {
     return new Promise((resolve, reject) => {
       this.db.all(
-        `SELECT a.*, u.name as creator_name FROM activities a
+        `SELECT a.id, a.title, a.description, a.file_path, a.file_name, a.file_type, a.file_size,
+                a.created_by, a.category, a.likes, a.created_at, u.name as creator_name,
+                u.bio as creator_bio, u.location as creator_location, u.specialties as creator_specialties,
+                CASE WHEN u.avatar_data IS NULL THEN 0 ELSE 1 END as creator_has_avatar
+         FROM activities a
          JOIN users u ON a.created_by = u.id
          WHERE a.created_by = ?
          ORDER BY a.created_at DESC
@@ -131,8 +140,51 @@ export class ActivityService {
             `UPDATE activities SET likes = (SELECT COUNT(*) FROM activity_likes WHERE activity_id = ?) WHERE id = ?`,
             [activityId, activityId],
             (err) => {
-              if (err) reject(err);
-              else resolve({ liked });
+              if (err) {
+                reject(err);
+                return;
+              }
+
+              if (!liked) {
+                resolve({ liked });
+                return;
+              }
+
+              db.get(
+                `SELECT a.id, a.title, a.created_by, u.name as liker_name
+                 FROM activities a
+                 LEFT JOIN users u ON u.id = ?
+                 WHERE a.id = ?`,
+                [userId, activityId],
+                async (activityErr, activity) => {
+                  if (activityErr) {
+                    reject(activityErr);
+                    return;
+                  }
+
+                  const rewards = new RewardService();
+                  const notifications = new NotificationService();
+                  try {
+                    await rewards.evaluateBadges(userId, 'activity_like_given');
+                    if (activity && Number(activity.created_by) !== Number(userId)) {
+                      await rewards.evaluateBadges(activity.created_by, 'activity_like_received');
+                      await notifications.createNotification(
+                        activity.created_by,
+                        'like',
+                        'New like on your activity',
+                        `${activity.liker_name || 'A teacher'} liked "${activity.title}".`,
+                        { activityId: activity.id, likerId: userId }
+                      );
+                    }
+                    resolve({ liked });
+                  } catch (sideEffectErr) {
+                    reject(sideEffectErr);
+                  } finally {
+                    rewards.close();
+                    notifications.close();
+                  }
+                }
+              );
             }
           );
         }
@@ -189,6 +241,22 @@ export class ActivityService {
   }
 
   /**
+   * Get uploaded file data for download.
+   */
+  async getActivityFile(activityId) {
+    return new Promise((resolve, reject) => {
+      this.db.get(
+        `SELECT file_path, file_name, file_type, file_data FROM activities WHERE id = ?`,
+        [activityId],
+        (err, row) => {
+          if (err) reject(err);
+          else resolve(row || null);
+        }
+      );
+    });
+  }
+
+  /**
    * Delete activity
    */
   async deleteActivity(activityId, userId) {
@@ -196,7 +264,7 @@ export class ActivityService {
       const db = this.db;
 
       db.get(
-        `SELECT file_path FROM activities WHERE id = ? AND created_by = ?`,
+        `SELECT file_path, file_data FROM activities WHERE id = ? AND created_by = ?`,
         [activityId, userId],
         (err, row) => {
           if (err) {
@@ -210,7 +278,7 @@ export class ActivityService {
           }
 
           // Delete file
-          if (row.file_path) {
+          if (row.file_path && !row.file_data) {
             const fullPath = path.join(uploadsDir, row.file_path);
             fs.unlink(fullPath, (err) => {
               if (err) console.error('Error deleting file:', err);
