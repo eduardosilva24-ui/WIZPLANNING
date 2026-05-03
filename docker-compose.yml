@@ -1,0 +1,22 @@
+# Run on a VPS to get one stable URL everyone can bookmark (bring your domain + HTTPS via Caddy/nginx).
+services:
+  wizplanning:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: "3000"
+      HOST: "0.0.0.0"
+      # Required in production — use a long random string ( openssl rand -hex 32 )
+      JWT_SECRET: "replace-with-a-long-random-secret"
+      # Behind nginx/Caddy terminating HTTPS → set to "1"
+      TRUST_PROXY: "0"
+    volumes:
+      # SQLite + uploads persist across container restarts
+      - wizplanning-database:/app/database
+      - wizplanning-uploads:/app/uploads
+    restart: unless-stopped
+
+volumes:
+  wizplanning-database:
+  wizplanning-uploads:

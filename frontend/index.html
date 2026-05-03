@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WizPlanning - Lesson Planning Made Easy</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/styles/main.css">
+    <link rel="stylesheet" href="/styles/gas-planner.css">
+    <link rel="stylesheet" href="/styles/animations.css">
+</head>
+<body>
+    <div id="app">
+        <!-- Loading Screen -->
+        <div id="loadingScreen" class="loading-screen active">
+            <div class="loading-container">
+                <div class="loading-spinner"></div>
+                <h1>WizPlanning</h1>
+                <p>Initializing application...</p>
+            </div>
+        </div>
+
+        <!-- Login Page -->
+        <div id="loginPage" class="page hidden">
+            <div class="login-container">
+                <div class="login-box">
+                <div class="logo-area">
+                    <div class="brand-logo">
+                        <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+                            <circle cx="100" cy="100" r="95" fill="#E63946"/>
+                            <text x="100" y="115" text-anchor="middle" font-size="60" font-weight="bold" fill="white">W</text>
+                        </svg>
+                    </div>
+                </div>
+                    
+                    <form id="loginForm" class="auth-form">
+                        <div class="form-group">
+                            <label for="loginEmail">Email</label>
+                            <input type="email" id="loginEmail" name="email" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="loginPassword">Password</label>
+                            <input type="password" id="loginPassword" name="password" required>
+                        </div>
+                        <button type="submit" class="btn btn-primary">Login</button>
+                    </form>
+
+                    <div class="auth-divider">or</div>
+
+                    <form id="registerForm" class="auth-form">
+                        <h3>Create Account</h3>
+                        <div class="form-group">
+                            <label for="registerName">Name</label>
+                            <input type="text" id="registerName" name="name" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="registerEmail">Email</label>
+                            <input type="email" id="registerEmail" name="email" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="registerPassword">Password</label>
+                            <input type="password" id="registerPassword" name="password" required>
+                        </div>
+                        <button type="submit" class="btn btn-secondary">Create Account</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main App -->
+        <div id="mainApp" class="main-app hidden">
+            <!-- Sidebar -->
+            <aside class="sidebar">
+                <div class="sidebar-header">
+                    <div class="sidebar-logo">
+                        <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+                            <circle cx="100" cy="100" r="95" fill="#E63946"/>
+                            <text x="100" y="115" text-anchor="middle" font-size="60" font-weight="bold" fill="white">W</text>
+                        </svg>
+                    </div>
+                    <h2>WizPlanning</h2>
+                    <div class="user-info">
+                        <p id="userName">Teacher</p>
+                        <small id="userRole">Teacher</small>
+                    </div>
+                </div>
+
+                <nav class="sidebar-nav">
+                    <button class="nav-item active" data-page="dashboard">
+                        <span class="icon">📊</span>
+                        <span>Dashboard</span>
+                    </button>
+                    <button class="nav-item" data-page="lesson-planner">
+                        <span class="icon">📝</span>
+                        <span>Lesson Planner</span>
+                    </button>
+                    <button class="nav-item" data-page="community">
+                        <span class="icon">👥</span>
+                        <span>Community</span>
+                    </button>
+                    <button class="nav-item" data-page="rewards">
+                        <span class="icon">🏆</span>
+                        <span>Rewards</span>
+                    </button>
+                </nav>
+
+                <div class="sidebar-footer">
+                    <button id="logoutBtn" class="btn btn-outline">Logout</button>
+                </div>
+            </aside>
+
+            <!-- Main Content -->
+            <main class="main-content">
+                <button id="sidebarToggle" class="btn btn-outline sidebar-toggle" type="button" aria-label="Toggle navigation">Menu</button>
+                <!-- Dashboard Page -->
+                <div id="dashboardPage" class="page-content active">
+                    <header class="page-header">
+                        <h1>Dashboard</h1>
+                        <p>Welcome back! Here's an overview of your lesson planning.</p>
+                    </header>
+
+                    <div class="dashboard-grid">
+                        <div class="stat-card">
+                            <h3>Lesson Plans</h3>
+                            <p class="stat-number" id="lessonPlanCount">0</p>
+                            <small>Total created</small>
+                        </div>
+                        <div class="stat-card">
+                            <h3>Points</h3>
+                            <p class="stat-number" id="userPoints">0</p>
+                            <small>Gamification rewards</small>
+                        </div>
+                        <div class="stat-card">
+                            <h3>Level</h3>
+                            <p class="stat-number" id="userLevel">Beginner</p>
+                            <small>Current achievement</small>
+                        </div>
+                        <div class="stat-card">
+                            <h3>Activities</h3>
+                            <p class="stat-number" id="activityCount">0</p>
+                            <small>Shared with community</small>
+                        </div>
+                    </div>
+
+                    <div class="recent-section">
+                        <h2>Recent Lesson Plans</h2>
+                        <div id="recentLessonPlans" class="lessons-list">
+                            <p class="empty-state">No lesson plans yet. Create one to get started!</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Lesson Planner — Apps Script formulario replica -->
+                <div id="lessonPlannerPage" class="page-content lesson-planner-wrap">
+                    <div class="gas-planner-body">
+                        <div class="gas-container">
+                            <h1 class="gas-title">Class Planning Program</h1>
+
+                            <div class="gas-main-content">
+                                <div class="gas-input-table">
+                                    <table>
+                                        <thead>
+                                            <tr>
+                                                <th>NAME</th>
+                                                <th>BOOK</th>
+                                                <th>LESSON</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="inputBody"></tbody>
+                                    </table>
+                                </div>
+
+                                <div class="gas-button-container">
+                                    <button type="button" class="gas-generate-btn" onclick="processData()">Gerar Aula</button>
+                                    <button type="button" class="gas-generate-btn" onclick="toggleObjectivesColumn()">
+                                        Mostrar/Ocultar Learning Objectives
+                                    </button>
+
+                                    <img
+                                        src="https://cdn.wizard.com.br/wp-content/uploads/2019/10/01155611/logo-aguia-wizard-by-pearson-idiomas.png"
+                                        class="gas-logo"
+                                        alt="Wizard logo" />
+
+                                    <div class="gas-horario-container">
+                                        <label for="horario">Horário da aula</label>
+                                        <input type="time" id="horario" />
+                                    </div>
+                                </div>
+
+                                <div class="gas-input-table">
+                                    <table>
+                                        <thead>
+                                            <tr>
+                                                <th>NAME</th>
+                                                <th>BOOK</th>
+                                                <th>LESSON</th>
+                                                <th>CHECKING TIME</th>
+                                                <th>LEARNING OBJECTIVES</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="outputBody"></tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <div style="margin-top: 20px">
+                                <label for="output">Copiar resultado para Excel:</label>
+                                <textarea id="output" readonly rows="5"></textarea>
+                                <button type="button" onclick="copiarResultado()" class="gas-generate-btn" style="padding: 8px 20px; font-size: 1rem">
+                                    Copiar para Excel
+                                </button>
+                            </div>
+
+                            <div class="gas-footer">Eduardo&#160;Moretti</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Community Page -->
+                <div id="communityPage" class="page-content">
+                    <header class="page-header">
+                        <h1>Community</h1>
+                        <p>Share and discover teaching activities with the community.</p>
+                    </header>
+
+                    <div class="community-container">
+                        <section class="upload-section">
+                            <h2>Share Activity</h2>
+                            <form id="uploadForm" class="upload-form">
+                                <div class="form-group">
+                                    <label for="activityTitle">Title</label>
+                                    <input type="text" id="activityTitle" required>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="activityDescription">Description</label>
+                                    <textarea id="activityDescription" rows="3"></textarea>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="activityCategory">Category</label>
+                                    <select id="activityCategory">
+                                        <option value="general">General</option>
+                                        <option value="grammar">Grammar</option>
+                                        <option value="vocabulary">Vocabulary</option>
+                                        <option value="speaking">Speaking</option>
+                                        <option value="writing">Writing</option>
+                                        <option value="reading">Reading</option>
+                                    </select>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="activityFile">File (PDF, Image, etc.)</label>
+                                    <input type="file" id="activityFile" required>
+                                </div>
+
+                                <button type="submit" class="btn btn-primary">Upload Activity</button>
+                            </form>
+                        </section>
+
+                        <section class="activities-section">
+                            <h2>Community Activities</h2>
+                            <div id="activitiesList" class="activities-grid">
+                                <p class="empty-state">No activities shared yet. Be the first!</p>
+                            </div>
+                        </section>
+                    </div>
+                </div>
+
+                <!-- Rewards Page -->
+                <div id="rewardsPage" class="page-content">
+                    <header class="page-header">
+                        <h1>Rewards & Leaderboard</h1>
+                        <p>Track your progress and compete with other teachers.</p>
+                    </header>
+
+                    <div class="rewards-container">
+                        <section class="user-rewards">
+                            <h2>Your Rewards</h2>
+                            <div class="rewards-display">
+                                <div class="reward-item">
+                                    <h3>Points</h3>
+                                    <p class="reward-value" id="dashboardPoints">0</p>
+                                </div>
+                                <div class="reward-item">
+                                    <h3>Level</h3>
+                                    <p class="reward-value" id="dashboardLevel">Beginner</p>
+                                </div>
+                                <div class="reward-item">
+                                    <h3>Badges</h3>
+                                    <p class="reward-value" id="badgeCount">0</p>
+                                </div>
+                            </div>
+
+                            <button id="dailyBonusBtn" class="btn btn-secondary">Claim Daily Bonus</button>
+                        </section>
+
+                        <section class="leaderboard">
+                            <h2>Top Teachers</h2>
+                            <table class="leaderboard-table table">
+                                <thead>
+                                    <tr>
+                                        <th>Rank</th>
+                                        <th>Teacher</th>
+                                        <th>Points</th>
+                                        <th>Level</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="leaderboardBody">
+                                    <tr>
+                                        <td colspan="4" class="empty-state">Loading...</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </section>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <div id="toastContainer" class="toast-container" aria-live="polite"></div>
+
+    <script src="/js/config.js"></script>
+    <script src="/js/api.js"></script>
+    <script src="/js/ui.js"></script>
+    <script src="/js/auth.js"></script>
+    <script src="/js/dashboard.js"></script>
+    <script src="/js/lessonPlanner.js"></script>
+    <script src="/js/community.js"></script>
+    <script src="/js/rewards.js"></script>
+    <script src="/js/app.js"></script>
+</body>
+</html>
