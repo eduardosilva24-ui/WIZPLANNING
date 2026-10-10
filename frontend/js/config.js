@@ -3,10 +3,12 @@
   const { protocol } = window.location;
   const openedAsFile = protocol === 'file:';
   const hostedOnGithubPages = window.location.hostname.endsWith('.github.io');
+  const runningLocalBackend =
+    !openedAsFile && ['localhost', '127.0.0.1'].includes(window.location.hostname);
   // REST backend base, for example: 'https://wizplanning-api.onrender.com'
   const deployedApiBase = '';
   // Google Apps Script backend base.
-  const deployedAppsScriptApiBase = 'https://script.google.com/macros/s/AKfycbxwobTuDMafuitKSFXKzN6B95QRvdMRR00GrHMfC73C4n-8ks94atyTYbCeHdt7qGd3/exec';
+  const deployedAppsScriptApiBase = 'https://script.google.com/macros/s/AKfycbxYX39KdMt6yIRRxkpAx_xBfdLste3YEDfI5kUl20hUZn8cQtQx8OlCEy4fv3HFIwyK/exec';
   const configuredApiBase =
     window.WIZPLANNING_API_BASE ||
     localStorage.getItem('wizplanning:apiBase') ||
@@ -27,7 +29,8 @@
     APPS_SCRIPT_API_BASE: configuredAppsScriptApiBase
       ? configuredAppsScriptApiBase.replace(/\/$/, '')
       : '',
-    APPS_SCRIPT_MODE: Boolean(configuredAppsScriptApiBase) && !configuredApiBase,
+    APPS_SCRIPT_MODE:
+      Boolean(configuredAppsScriptApiBase) && !configuredApiBase && !runningLocalBackend,
     STATIC_MODE: hostedOnGithubPages && !configuredApiBase && !configuredAppsScriptApiBase
   };
 })();

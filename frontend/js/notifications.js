@@ -27,12 +27,12 @@ class Notifications {
     if (!container) return;
 
     try {
-      window.UI?.renderState(container, 'loading', 'Loading notifications...');
+      window.UI?.renderState(container, 'loading', 'Carregando notificações…');
       const { notifications, unreadCount } = await window.API.getNotifications(30, 0);
       this.updateBadge(unreadCount);
       this.renderNotifications(notifications);
     } catch (error) {
-      window.UI?.renderState(container, 'error', 'Failed to load notifications.');
+      window.UI?.renderState(container, 'error', 'Não foi possível carregar as notificações.');
     }
   }
 
@@ -42,7 +42,7 @@ class Notifications {
     container.replaceChildren();
 
     if (!notifications.length) {
-      window.UI?.renderState(container, 'empty', 'No notifications yet.');
+      window.UI?.renderState(container, 'empty', 'Você está em dia. Nenhuma notificação por enquanto.');
       return;
     }
 
@@ -52,20 +52,20 @@ class Notifications {
 
       const marker = document.createElement('span');
       marker.className = `notification-type notification-${notification.type || 'info'}`;
-      marker.textContent = notification.type === 'badge' ? 'Badge' : notification.type === 'like' ? 'Like' : 'Update';
+      marker.textContent = notification.type === 'badge' ? 'Conquista' : notification.type === 'like' ? 'Curtida' : 'Novidade';
 
       const content = document.createElement('div');
       content.className = 'notification-content';
 
       const title = document.createElement('h3');
-      title.textContent = notification.title || 'Notification';
+      title.textContent = notification.title || 'Notificação';
 
       const message = document.createElement('p');
       message.textContent = notification.message || '';
 
       const date = document.createElement('small');
       date.textContent = notification.created_at
-        ? new Date(notification.created_at).toLocaleString()
+        ? new Date(notification.created_at).toLocaleString('pt-BR')
         : '';
 
       content.append(title, message, date);
@@ -75,7 +75,7 @@ class Notifications {
         const readBtn = document.createElement('button');
         readBtn.type = 'button';
         readBtn.className = 'btn btn-outline notification-read-btn';
-        readBtn.textContent = 'Read';
+        readBtn.textContent = 'Marcar como lida';
         readBtn.addEventListener('click', async () => {
           await window.API.markNotificationRead(notification.id);
           await this.loadNotifications();
@@ -93,7 +93,7 @@ class Notifications {
       await this.loadNotifications();
       this.updateBadge(0);
     } catch (error) {
-      window.UI?.showToast(`Could not mark notifications read: ${error.message}`, 'error');
+      window.UI?.showToast(`Não foi possível atualizar as notificações: ${error.message}`, 'error');
     }
   }
 }

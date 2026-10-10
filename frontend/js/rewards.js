@@ -6,12 +6,12 @@ class Rewards {
   static async claimDailyBonus() {
     const btn = document.getElementById('dailyBonusBtn');
     try {
-      window.UI?.setButtonLoading(btn, true, 'Claiming...');
+      window.UI?.setButtonLoading(btn, true, 'Resgatando...');
       const result = await window.API.getDailyBonus();
       if (result.bonusAwarded) {
-        window.UI.showToast(`+${result.points} points!`, 'success');
+        window.UI.showToast(`+${result.points} pontos!`, 'success');
       } else {
-        window.UI.showToast(result.message || 'Already claimed', 'info');
+        window.UI.showToast(result.message || 'O bônus de hoje já foi resgatado.', 'info');
       }
       await this.refreshRewards(true);
       await window.Notifications?.refreshUnreadCount?.();
@@ -30,7 +30,7 @@ class Rewards {
     } catch (e) {
       console.warn('Rewards fallback', e);
       this.#updateElements({ points: 0, level: 'Beginner', badges: [] });
-      window.UI?.showToast('Rewards demo', 'warning');
+      window.UI?.showToast('Não foi possível atualizar as conquistas.', 'warning');
     }
   }
 
@@ -57,7 +57,7 @@ class Rewards {
 
     container.replaceChildren();
     if (!badges.length) {
-      window.UI?.renderState(container, 'empty', 'No badges yet.');
+      window.UI?.renderState(container, 'empty', 'Suas conquistas aparecerão aqui.');
       return;
     }
 
@@ -114,7 +114,7 @@ class Rewards {
     const loadingRow = document.createElement('tr');
     const loadingCell = document.createElement('td');
     loadingCell.colSpan = 4;
-    loadingCell.textContent = 'Loading...';
+    loadingCell.textContent = 'Carregando…';
     loadingRow.appendChild(loadingCell);
     tbody.appendChild(loadingRow);
 
@@ -125,7 +125,7 @@ class Rewards {
       const row = document.createElement('tr');
       const cell = document.createElement('td');
       cell.colSpan = 4;
-      cell.textContent = 'No data';
+      cell.textContent = 'Nenhum dado disponível';
       row.appendChild(cell);
       tbody.replaceChildren(row);
     }

@@ -1,8 +1,13 @@
-// Assembled into Code.gs by scripts/assemble-google-apps-script-Code.gs.mjs
-// Planner core is unchanged; learning objectives and livros are injected from shared/*.json.
+// WizPlanning: standalone Google Apps Script project (all Apps Script source is here).
+var WIZPLANNING_GAS_BUILD_ID = "unique-teacher-accounts-20261010-1";
+// BEGIN PLANNER CORE
 
-function doGet() {
-    return HtmlService.createHtmlOutputFromFile("formulario");
+function doGet(e) {
+    if (e && e.parameter && e.parameter.action) {
+        console.log("[WizPlanningAPI][" + WIZPLANNING_GAS_BUILD_ID + "] GET action=" + safeDiagnosticToken_(e.parameter.action));
+        return handleApiGet_(e);
+    }
+    return HtmlService.createHtmlOutput(PLANNER_HTML).setTitle("WizPlanning");
 }
 
 // Agora aceita texto e horário opcional (terceiro parâmetro do cliente é ignorado; mantém contrato da UI)
@@ -32,6 +37,7 @@ function processarTextoComHorario(texto, horarioStr) {
 
 
 
+    // BEGIN EMBEDDED COURSE DATA
     const allLearningObjectives = {
   "NW2": {
       "1" : "• Can name some kinds of foods and drinks. • Can say what they eat and what they drink.",
@@ -436,6 +442,7 @@ function processarTextoComHorario(texto, horarioStr) {
     "NW12": ["1000", "301", "302", "303", "304", "305", "306", "1111", "307", "308", "309", "310", "311", "312", "2222", "313", "314", "315", "316", "317", "318", "3333", "1005", "319", "320", "321", "322", "323", "324", "4444", "325", "326", "327", "328", "329", "330", "5555", "331", "332", "333", "334", "335", "336", "6666", "337", "338", "339", "340", "341", "342", "7777", "343", "344", "345", "346", "347", "348", "8888", "349", "350", "351", "352", "353", "354", "9999", "355", "356", "357", "358", "359", "360", "1010", "000"]
 
 };
+    // END EMBEDDED COURSE DATA
 
     const listaReviews = ["1111", "2222", "3333", "4444", "5555", "6666", "7777", "8888", "9999", "1010"];
 
@@ -679,3 +686,1285 @@ const linhasSaida = resultado.map((r, i) => {
 
 return linhasSaida.join("\n");
 }
+
+// END PLANNER CORE
+
+// ===== Class launch and local ranking helpers =====
+/**
+ * Registro silencioso de aula + pontos (equivalente a classes.json / users.json via ScriptProperties).
+ * Não altera processarTextoComHorario; invocado só após o planejamento em processarTexto.
+ */
+
+var LAUNCH_STORAGE_KEYS = {
+    classes: "wiz_classes_json",
+    users: "wiz_users_json"
+};
+
+var POINTS_PER_CLASS_LAUNCHED = 10;
+
+function extrairAlunosDoTexto(texto) {
+    const linhas = texto
+        .trim()
+        .split("\n")
+        .map(function (l) { return l.trim(); })
+        .filter(function (l) { return l !== ""; });
+
+    const alunos = linhas.map(function (l) {
+        const parts = l.split(/\t| {2,}/);
+        var nome = parts[0];
+        var livro = parts[1];
+        var numeroRaw = parts[2];
+        return {
+            nome: nome ? nome.trim() : "",
+            livro: livro ? livro.trim().toUpperCase() : "",
+            numeroRaw: numeroRaw ? numeroRaw.trim() : ""
+        };
+    }).filter(function (a) { return a.nome && a.livro && a.numeroRaw; });
+
+    return alunos;
+}
+
+function readClassesArray_() {
+    var raw = PropertiesService.getScriptProperties().getProperty(LAUNCH_STORAGE_KEYS.classes);
+    if (!raw) return [];
+    try {
+        var arr = JSON.parse(raw);
+        return Array.isArray(arr) ? arr : [];
+    } catch (e) {
+        return [];
+    }
+}
+
+function writeClassesArray_(classes) {
+    PropertiesService.getScriptProperties().setProperty(
+        LAUNCH_STORAGE_KEYS.classes,
+        JSON.stringify(classes)
+    );
+}
+
+function readUsersArray_() {
+    var raw = PropertiesService.getScriptProperties().getProperty(LAUNCH_STORAGE_KEYS.users);
+    if (!raw) return [];
+    try {
+        var arr = JSON.parse(raw);
+        return Array.isArray(arr) ? arr : [];
+    } catch (e) {
+        return [];
+    }
+}
+
+function writeUsersArray_(users) {
+    PropertiesService.getScriptProperties().setProperty(
+        LAUNCH_STORAGE_KEYS.users,
+        JSON.stringify(users)
+    );
+}
+
+/** Ranking atual: usuários por pontos (desc). */
+function obterRanking() {
+    var users = readUsersArray_().slice();
+    users.sort(function (a, b) {
+        return (b.points || 0) - (a.points || 0);
+    });
+    return users;
+}
+
+function ensureUserRecord_(users, professorId) {
+    var id = String(professorId);
+    for (var i = 0; i < users.length; i++) {
+        if (users[i].id === id) return users[i];
+    }
+    var rec = { id: id, name: id, points: 0 };
+    users.push(rec);
+    return rec;
+}
+
+/** Identifica o professor sem UI (web app: e-mail quando a sessão expõe usuário). */
+function resolverProfessorIdParaRegistro_() {
+    try {
+        var active = Session.getActiveUser();
+        if (active) {
+            var em = active.getEmail();
+            if (em) return em;
+        }
+    } catch (e1) { }
+    try {
+        var em2 = Session.getEffectiveUser().getEmail();
+        if (em2) return em2;
+    } catch (e2) { }
+    return "anonymous";
+}
+
+/**
+ * Chamada após o planejamento: persiste classe, pontua professor, atualiza dados de ranking.
+ */
+function registrarAulaPosPlanejamento_(planningOutput, textoBruto) {
+    var pid = resolverProfessorIdParaRegistro_();
+    launchClass(planningOutput, extrairAlunosDoTexto(textoBruto), pid);
+}
+
+/**
+ * @param {string} planningOutput
+ * @param {Array} alunos — { nome, livro, numeroRaw }
+ * @param {string} professorId
+ */
+function launchClass(planningOutput, alunos, professorId) {
+    var classes = readClassesArray_();
+    var id = Utilities.getUuid();
+    var timestamp = new Date().toISOString();
+    classes.push({
+        id: id,
+        professorId: String(professorId),
+        timestamp: timestamp,
+        alunos: alunos,
+        planningOutput: planningOutput
+    });
+    writeClassesArray_(classes);
+
+    var users = readUsersArray_();
+    var u = ensureUserRecord_(users, professorId);
+    u.points = (u.points || 0) + POINTS_PER_CLASS_LAUNCHED;
+    writeUsersArray_(users);
+}
+
+// ===== Online API, Google Sheets persistence, and Gemini integration =====
+var SPREADSHEET_ID = "1c8n7A8T54hTC_0dFdB7DgzLApmdVP2xoM6O6ABDefi4";
+
+var SHEETS = {
+  USERS: "Users",
+  MEDALS: "Medals",
+  NOTIFICATIONS: "Notifications",
+  LESSON_PLANS: "LessonPlans",
+  ACTIVITIES: "Activities",
+  ACTIVITY_LIKES: "ActivityLikes",
+  REWARDS: "Rewards"
+};
+
+var HEADERS = {
+  USERS: ["id", "name", "bio", "photo_url", "created_at", "email"],
+  MEDALS: ["id", "user_id", "medal_name", "date"],
+  NOTIFICATIONS: ["id", "user_id", "message", "read", "timestamp"],
+  LESSON_PLANS: ["id", "user_id", "student_name", "book", "lesson", "objectives", "check_time", "notes", "created_at", "updated_at"],
+  ACTIVITIES: ["id", "user_id", "title", "description", "category", "file_url", "file_name", "file_type", "likes", "created_at"],
+  ACTIVITY_LIKES: ["id", "activity_id", "user_id", "created_at"],
+  REWARDS: ["user_id", "points", "last_bonus_date", "updated_at"]
+};
+
+var POINTS = {
+  LESSON_PLAN: 10,
+  ACTIVITY_POST: 20,
+  LIKE_RECEIVED: 2,
+  DAILY_BONUS: 5
+};
+
+function handleApiGet_(e) {
+  var params = e && e.parameter ? e.parameter : {};
+  var action = params.action;
+  if (action === "health") {
+    return success_({ service: "WizPlanningAPI", buildId: WIZPLANNING_GAS_BUILD_ID });
+  }
+
+  try {
+    ensureAllSheets_();
+
+    switch (action) {
+      case "getUsers":
+        return success_(getUsers().map(function (user) { return publicUser_(user); }));
+      case "getUser":
+        return success_(publicUser_(getUser(requireParam_(params, "userId"))));
+      case "getMedals":
+        return success_(getMedals(requireParam_(params, "userId")));
+      case "getNotifications":
+        return success_(getNotifications(requireParam_(params, "userId")));
+      case "getUnreadNotificationsCount":
+        return success_(getUnreadNotificationsCount(requireParam_(params, "userId")));
+      case "getLessonPlans":
+        return success_(getLessonPlans(requireParam_(params, "userId"), params));
+      case "getLessonPlan":
+        return success_(getLessonPlan(requireParam_(params, "id"), params.userId || ""));
+      case "getRewards":
+        return success_(getRewards(requireParam_(params, "userId")));
+      case "getLeaderboard":
+        return success_(getLeaderboard(params));
+      case "getActivities":
+        return success_(getActivities(params));
+      case "getActivitiesByCategory":
+        return success_(getActivitiesByCategory(requireParam_(params, "category"), params));
+      case "getUserActivities":
+        return success_(getUserActivities(requireParam_(params, "targetUserId"), params));
+      default:
+        throw new Error("Unknown GET action: " + action);
+    }
+  } catch (err) {
+    return failure_(err);
+  }
+}
+
+function doPost(e) {
+  var requestId = Utilities.getUuid();
+  var action = "unknown";
+  var logPrefix = "[WizPlanningAPI][" + WIZPLANNING_GAS_BUILD_ID + "][request=" + requestId + "]";
+  try {
+    var params = e && e.parameter ? e.parameter : {};
+    var body = parsePostBody_(e);
+    var data = mergeObjects_(body, params);
+    action = params.action || data.action || "unknown";
+    requestId = safeRequestId_(data.requestId) || requestId;
+    logPrefix = "[WizPlanningAPI][" + WIZPLANNING_GAS_BUILD_ID + "][request=" + requestId + "]";
+    console.log(logPrefix + " POST action=" + safeDiagnosticToken_(action));
+
+    // AI reviews do not read or write Sheets, so keep this path independent
+    // from spreadsheet initialization and its latency.
+    if (action === "reviewLessonWithAI") {
+      var review = reviewLessonWithAI_(data, requestId);
+      review.requestId = requestId;
+      console.log(logPrefix + " AI review completed.");
+      return success_(review);
+    }
+
+    ensureAllSheets_();
+
+    switch (action) {
+      case "createUser":
+        return success_(withLock_(function () { return createUser(data); }));
+      case "updateUser":
+        return success_(withLock_(function () { return updateUser(data); }));
+      case "addMedal":
+        return success_(withLock_(function () { return addMedal(data); }));
+      case "createNotification":
+        return success_(withLock_(function () { return createNotification(data); }));
+      case "markNotificationRead":
+        return success_(withLock_(function () { return markNotificationRead(data); }));
+      case "markAllNotificationsRead":
+        return success_(withLock_(function () { return markAllNotificationsRead(data); }));
+      case "createLessonPlan":
+        return success_(withLock_(function () { return createLessonPlan(data); }));
+      case "saveClassPlan":
+        return success_(withLock_(function () { return saveClassPlan(data); }));
+      case "updateLessonPlan":
+        return success_(withLock_(function () { return updateLessonPlan(data); }));
+      case "deleteLessonPlan":
+        return success_(withLock_(function () { return deleteLessonPlan(data); }));
+      case "claimDailyBonus":
+        return success_(withLock_(function () { return claimDailyBonus(data); }));
+      case "createActivity":
+        return success_(withLock_(function () { return createActivity(data); }));
+      case "likeActivity":
+        return success_(withLock_(function () { return likeActivity(data); }));
+      case "unlikeActivity":
+        return success_(withLock_(function () { return unlikeActivity(data); }));
+      case "deleteActivity":
+        return success_(withLock_(function () { return deleteActivity(data); }));
+      default:
+        throw new Error("Unknown POST action: " + action);
+    }
+  } catch (err) {
+    var errorDetail = action === "reviewLessonWithAI" ? safeDiagnosticError_(err) : String(err && err.name || "Error");
+    console.error(logPrefix + " POST failed for action=" + safeDiagnosticToken_(action) + ": " + errorDetail);
+    return failure_(err, requestId);
+  }
+}
+
+function getUsers() {
+  return readRecords_(SHEETS.USERS, HEADERS.USERS);
+}
+
+function publicUser_(user) {
+  if (!user) return user;
+  var safeUser = Object.assign({}, user);
+  delete safeUser.email;
+  return safeUser;
+}
+
+function reviewLessonWithAI_(data, requestId) {
+  var planText = String(optionalParam_(data, "planText", "")).trim();
+  var maxPlanLength = 18000;
+  if (!planText) throw new Error("Gere um plano de aula antes de pedir a revisão da IA.");
+  if (planText.length > maxPlanLength) throw new Error("Este plano é muito grande para a revisão com IA.");
+  var logPrefix = "[WizPlanningAPI][" + WIZPLANNING_GAS_BUILD_ID + "][request=" + safeRequestId_(requestId) + "]";
+  console.log(logPrefix + " AI review accepted; planChars=" + planText.length + ".");
+
+  var properties = PropertiesService.getScriptProperties();
+  var apiKey = String(properties.getProperty("GEMINI_API_KEY") || "").trim();
+  if (!apiKey) throw new Error("A IA ainda não está configurada no Apps Script.");
+
+  var model = String(properties.getProperty("GEMINI_MODEL") || "gemini-3.8-flash").trim();
+  if (!/^[a-zA-Z0-9._-]+$/.test(model)) throw new Error("O modelo da IA configurado é inválido.");
+
+  var prompt = "Revise este planejamento de aula:\n\n" + planText;
+  var compactRetryInstruction = "\n\nRETENTATIVA DE COMPLETUDE: a resposta anterior não concluiu todas as seções ou todos os alunos. Gere agora o relatório completo, de forma mais concisa, sem ultrapassar o limite: mantenha os cinco títulos e a ordem exata; use uma frase objetiva por aluno; Peer Work apenas com elegibilidade confirmada ou a limitação dos dados; inclua Warm-up completo com nome, duração, materiais, objetivo, passos numerados e exemplos curtos em inglês; inclua Closing completo com nome, duração, materiais, execução e objetivo pedagógico; termine com orientação de 1–3 frases. Não omita aluno nem campo obrigatório e não repita explicações.";
+  var systemInstruction = [
+    "Você é o assistente pedagógico do WizPlanning, especializado no ensino de inglês e na metodologia Wizard by Pearson. Transforme exclusivamente os dados fornecidos em relatório profissional, personalizado, objetivo e aplicável.",
+    "PRECISÃO: os dados podem conter nome, livro, número da lição, objetivo/conteúdo, última lição estudada, observações e histórico. Considere somente o que estiver presente; a entrada habitual contém nome, livro, lição, horário opcional e objetivo. Preserve nomes, livros e lições e inclua todos. Não confunda lição atual com última estudada. Não invente conteúdo, objetivos, nível, dificuldade, personalidade ou dados pessoais. Não deduza o conteúdo pelo código/número da lição. Se faltar informação essencial, declare a limitação.",
+    "INTRODUÇÃO: para cada aluno, informe nome, livro, lição e em uma ou duas frases o que aprenderá, priorizando o que compreenderá, dirá, perguntará, responderá ou escreverá. Não inclua atividades nesta seção. Se alunos da mesma lição tiverem objetivos iguais, evite repetição desnecessária sem omitir nomes.",
+    "PEER WORK — SOMENTE ORGANIZAÇÃO: o exercício já consta no livro; não crie, descreva, adapte ou substitua essa atividade. A paridade é o próprio número informado da lição: número par (por exemplo, 24) participa; número ímpar não participa. Se a lição estiver ausente ou não for numérica, não deduza a paridade. Uma dupla é válida se ambos estão na mesma lição do mesmo livro; ou se um está em lição posterior do mesmo livro e já estudou a lição atual do colega — exija evidência explícita de conclusão para esta segunda regra. Nunca compare números de livros diferentes ou crie critérios adicionais. Analise a turma toda; maximize duplas válidas sem repetir aluno, mas não force combinações. Só indique Peer Work com o professor se estiver comprovado que o aluno está na posição mais avançada e sem par elegível; caso contrário, peça confirmação ao professor. Se faltar evidência de conclusão para uma lição posterior, peça confirmação. Informe apenas nomes, livro/lição quando necessário e limitações; não descreva a tarefa do livro.",
+    "WARM-UP: proponha uma única ativação de 3–5 minutos que integre os cinco pilares: interação, integração, produção, reprodução ativa de conteúdo já trabalhado e quebra de estado com propósito pedagógico. Em turma multinível, mantenha a dinâmica comum e adapte desafios aos objetivos individuais. Use pouca preparação e materiais simples; evite repetição quando houver histórico. Informe Nome, Duração, Materiais, Objetivo, Execução com passos numerados e exemplos em inglês quando pertinentes, de modo concreto e imediatamente executável. Se não houver histórico, não invente o que já foi estudado: peça ao professor que selecione para a retomada um item que a turma realmente praticou.",
+    "CLOSING: sugira encerramento curto nos minutos finais, relacionado aos objetivos individuais e que permita observar a aprendizagem. Pode ser revisão, reflexão, produção ou desafio; não transforme em segunda aula ou avaliação extensa. Informe Nome, Duração, Materiais, Execução clara e Objetivo pedagógico.",
+    "FORMATO FINAL: entregue somente o relatório em português e exatamente nesta ordem/títulos: INTRODUÇÃO; PEER WORK (DUPLAS/GRUPOS); WARM-UP (ATIVAÇÃO INICIAL); CLOSING (ENCERRAMENTO); ORIENTAÇÃO FINAL AO PROFESSOR. Use títulos, listas e parágrafos curtos. Finalize com orientação sustentada nos dados, de 1–3 frases. Não comente sobre IA nem processo."
+  ].join("\n\n");
+
+  var quotaReservation = consumeGeminiReviewQuota_(properties);
+  var quotaCommitted = false;
+  try {
+    for (var attempt = 0; attempt < 2; attempt++) {
+      var payload = {
+        model: model,
+        input: prompt + (attempt === 1 ? compactRetryInstruction : ""),
+        system_instruction: systemInstruction,
+        generation_config: { max_output_tokens: 2400, thinking_level: "low" }
+      };
+      var result = fetchGeminiReviewResult_(payload, apiKey, planText, logPrefix, requestId);
+      var outputSteps = result && Array.isArray(result.steps) ? result.steps : [];
+      var outputParts = [];
+      outputSteps.forEach(function (step) {
+        if (!step || step.type !== "model_output" || !Array.isArray(step.content)) return;
+        step.content.forEach(function (part) {
+          if (part && part.type === "text" && part.text) outputParts.push(String(part.text));
+        });
+      });
+      var text = outputParts.join("\n").trim();
+      var providerStatus = String(result && result.status || "").toLowerCase();
+      if (providerStatus === "failed" || providerStatus === "cancelled") {
+        throw new Error("O Google Gemini não concluiu a revisão. Consulte a execução " + safeRequestId_(requestId) + ".");
+      }
+      if (text && providerStatus !== "incomplete" && isCompleteLessonReview_(text, planText)) {
+        quotaCommitted = true;
+        return { text: text, model: result.model || model, status: providerStatus || "completed" };
+      }
+      if (attempt === 0) {
+        console.warn(logPrefix + " Gemini returned an incomplete or structurally incomplete report; retrying concisely within the 2400-token limit.");
+        continue;
+      }
+      var incompleteError = new Error("A IA não conseguiu concluir o relatório completo dentro do limite de 2.400 tokens. Divida a turma em grupos menores e tente novamente.");
+      incompleteError.requestId = safeRequestId_(requestId);
+      throw incompleteError;
+    }
+    throw new Error("A IA não retornou um relatório completo. Tente novamente.");
+  } finally {
+    if (!quotaCommitted) releaseGeminiReviewQuota_(properties, quotaReservation);
+  }
+}
+
+function fetchGeminiReviewResult_(payload, apiKey, planText, logPrefix, requestId) {
+  var fetchStartedAt = Date.now();
+  var response;
+  try {
+    response = UrlFetchApp.fetch("https://generativelanguage.googleapis.com/v1beta/interactions", {
+      method: "post",
+      contentType: "application/json",
+      headers: { "X-goog-api-key": apiKey },
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true
+    });
+  } catch (err) {
+    var errorName = String(err && err.name || "Error");
+    var errorMessage = String(err && err.message || err || "Unknown fetch error");
+    if (apiKey) errorMessage = errorMessage.split(apiKey).join("[REDACTED]");
+    if (planText) errorMessage = errorMessage.split(planText).join("[PLAN REDACTED]");
+    errorMessage = errorMessage.replace(/[\r\n\t]+/g, " ").slice(0, 500);
+    console.error(logPrefix + " Gemini UrlFetchApp.fetch failed after " + (Date.now() - fetchStartedAt) + " ms (" + errorName + "): " + errorMessage);
+    var fetchError = new Error("Não foi possível acessar o serviço de IA. Tente novamente em instantes.");
+    fetchError.requestId = safeRequestId_(requestId);
+    throw fetchError;
+  }
+
+  if (response.getResponseCode() === 503) {
+    console.warn(logPrefix + " Gemini returned HTTP 503; retrying once after a short backoff.");
+    Utilities.sleep(1000);
+    response = UrlFetchApp.fetch("https://generativelanguage.googleapis.com/v1beta/interactions", {
+      method: "post",
+      contentType: "application/json",
+      headers: { "X-goog-api-key": apiKey },
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true
+    });
+  }
+
+  var status = response.getResponseCode();
+  console.log(logPrefix + " Gemini API returned HTTP " + status + " after " + (Date.now() - fetchStartedAt) + " ms.");
+  var result = {};
+  try {
+    result = JSON.parse(response.getContentText() || "{}");
+  } catch (err) {
+    throw new Error("O serviço de IA retornou uma resposta inválida.");
+  }
+  if (status < 200 || status >= 300) {
+    var providerError = result && result.error ? result.error : {};
+    var providerMessage = String(providerError.message || "");
+    if (apiKey) providerMessage = providerMessage.split(apiKey).join("[REDACTED]");
+    if (planText) providerMessage = providerMessage.split(planText).join("[PLAN REDACTED]");
+    providerMessage = providerMessage.replace(/AQ\.[A-Za-z0-9_-]{20,}/g, "[REDACTED]").replace(/[\r\n\t]+/g, " ").slice(0, 300);
+    console.error(logPrefix + " Gemini API error code=" + String(providerError.code || status) + " status=" + String(providerError.status || "unknown") + (providerMessage ? " message=" + providerMessage : ""));
+    if (status === 401 || status === 403) throw new Error("O Google Gemini rejeitou a chave ou o acesso ao modelo. Confirme as permissões da chave no Google AI Studio.");
+    if (status === 429) throw new Error("O limite de uso da IA foi atingido. Tente novamente mais tarde.");
+    var requestError = new Error("O Google Gemini recusou a solicitação (HTTP " + status + ")." + (providerMessage ? " " + providerMessage : "") + " Consulte a execução " + safeRequestId_(requestId) + ".");
+    requestError.requestId = safeRequestId_(requestId);
+    throw requestError;
+  }
+  return result;
+}
+
+function normalizeLessonReviewText_(value) {
+  return String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+}
+
+function isCompleteLessonReview_(text, planText) {
+  var requiredSections = [
+    "INTRODUÇÃO",
+    "PEER WORK (DUPLAS/GRUPOS)",
+    "WARM-UP (ATIVAÇÃO INICIAL)",
+    "CLOSING (ENCERRAMENTO)",
+    "ORIENTAÇÃO FINAL AO PROFESSOR"
+  ];
+  var reportLines = String(text || "").split(/\r?\n/);
+  var normalizedLines = reportLines.map(function (line) {
+    return normalizeLessonReviewText_(line.trim().replace(/^#{1,6}\s*/, "").replace(/^\*+|\*+$/g, "").trim());
+  });
+  var sectionLineIndexes = requiredSections.map(function (section) {
+    return normalizedLines.indexOf(normalizeLessonReviewText_(section));
+  });
+  for (var i = 0; i < sectionLineIndexes.length; i++) {
+    if (sectionLineIndexes[i] < 0 || (i > 0 && sectionLineIndexes[i] <= sectionLineIndexes[i - 1])) return false;
+  }
+
+  var introduction = normalizedLines.slice(sectionLineIndexes[0] + 1, sectionLineIndexes[1]).join("\n");
+  var studentNames = String(planText || "").split(/\r?\n/).map(function (line) {
+    return line.split(/\t| {2,}/, 1)[0].trim();
+  }).filter(Boolean);
+  if (!studentNames.every(function (name) {
+    return introduction.indexOf(normalizeLessonReviewText_(name)) !== -1;
+  })) return false;
+
+  function sectionBody_(sectionIndex) {
+    return reportLines.slice(sectionLineIndexes[sectionIndex] + 1,
+      sectionLineIndexes[sectionIndex + 1] === undefined ? reportLines.length : sectionLineIndexes[sectionIndex + 1])
+      .join("\n").replace(/[*_`]/g, "");
+  }
+  var warmUp = normalizeLessonReviewText_(sectionBody_(2));
+  var closing = normalizeLessonReviewText_(sectionBody_(3));
+  var finalGuidance = sectionBody_(4).trim();
+  function hasLabels_(body, labels) {
+    return labels.every(function (label) { return new RegExp(label + "\\s*:").test(body); });
+  }
+  return hasLabels_(warmUp, ["nome", "duracao", "materiais", "objetivo", "execucao"])
+    && hasLabels_(closing, ["nome", "duracao", "materiais", "execucao", "objetivo pedagogico"])
+    && Boolean(finalGuidance);
+}
+
+/**
+ * Execute once from the Apps Script editor if UrlFetchApp reports a permission error.
+ * This checks the external-request authorization without sending a Gemini prompt or API key.
+ */
+function authorizeGeminiExternalRequest() {
+  var response = UrlFetchApp.fetch("https://www.googleapis.com", {
+    method: "get",
+    muteHttpExceptions: true
+  });
+  var status = response.getResponseCode();
+  console.log("[WizPlanningAPI][" + WIZPLANNING_GAS_BUILD_ID + "] External-request authorization check returned HTTP " + status + ".");
+  return { authorized: true, httpStatus: status, buildId: WIZPLANNING_GAS_BUILD_ID };
+}
+
+function consumeGeminiReviewQuota_(properties) {
+  var dailyLimit = parseInt(properties.getProperty("GEMINI_DAILY_REVIEW_LIMIT") || "100", 10);
+  if (!isFinite(dailyLimit) || dailyLimit < 1) dailyLimit = 100;
+  var today = Utilities.formatDate(new Date(), "Etc/UTC", "yyyy-MM-dd");
+
+  withLock_(function () {
+    var storedDate = properties.getProperty("GEMINI_REVIEW_QUOTA_DATE") || "";
+    var currentCount = storedDate === today
+      ? parseInt(properties.getProperty("GEMINI_REVIEW_QUOTA_COUNT") || "0", 10)
+      : 0;
+    if (!isFinite(currentCount) || currentCount < 0) currentCount = 0;
+    if (currentCount >= dailyLimit) {
+      throw new Error("O limite diário de revisões com IA foi atingido. Tente novamente amanhã.");
+    }
+    properties.setProperties({
+      GEMINI_REVIEW_QUOTA_DATE: today,
+      GEMINI_REVIEW_QUOTA_COUNT: String(currentCount + 1)
+    }, false);
+  });
+  return { date: today };
+}
+
+function releaseGeminiReviewQuota_(properties, reservation) {
+  if (!reservation || !reservation.date) return;
+  try {
+    withLock_(function () {
+      var storedDate = properties.getProperty("GEMINI_REVIEW_QUOTA_DATE") || "";
+      if (storedDate !== reservation.date) return;
+      var currentCount = parseInt(properties.getProperty("GEMINI_REVIEW_QUOTA_COUNT") || "0", 10);
+      if (!isFinite(currentCount) || currentCount < 1) return;
+      properties.setProperty("GEMINI_REVIEW_QUOTA_COUNT", String(currentCount - 1));
+    });
+  } catch (err) {
+    console.error("[WizPlanningAPI][" + WIZPLANNING_GAS_BUILD_ID + "] Failed to release an unsuccessful AI quota reservation: " + safeDiagnosticError_(err));
+  }
+}
+
+function getUser(userId) {
+  var found = findRecordById_(SHEETS.USERS, HEADERS.USERS, userId);
+  return found ? found.object : null;
+}
+
+function createUser(data) {
+  var name = String(requireParam_(data, "name")).replace(/\s+/g, " ").trim();
+  var email = normalizeEmail_(requireParam_(data, "email"));
+  if (name.length < 2 || name.length > 80) throw new Error("O nome deve ter entre 2 e 80 caracteres.");
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Informe um e-mail válido.");
+
+  var existingUsers = readRecords_(SHEETS.USERS, HEADERS.USERS);
+  var normalizedName = normalizeAccountName_(name);
+  if (existingUsers.some(function (existing) { return normalizeEmail_(existing.email) === email; })) {
+    throw new Error("Já existe uma conta com este e-mail.");
+  }
+  if (existingUsers.some(function (existing) { return normalizeAccountName_(existing.name) === normalizedName; })) {
+    throw new Error("Já existe uma conta com este nome.");
+  }
+
+  var user = {
+    id: generateId_("user"),
+    name: name,
+    bio: optionalParam_(data, "bio", ""),
+    photo_url: optionalParam_(data, "photo_url", ""),
+    created_at: timestamp_(),
+    email: email
+  };
+  appendRecord_(SHEETS.USERS, HEADERS.USERS, user);
+  ensureRewardRecord_(user.id);
+  createNotification({ userId: user.id, message: "Welcome to WizPlanning.", read: false });
+  return user;
+}
+
+function updateUser(data) {
+  var userId = requireEitherParam_(data, ["userId", "id"]);
+  var found = findRecordById_(SHEETS.USERS, HEADERS.USERS, userId);
+  if (!found) throw new Error("User not found: " + userId);
+
+  var user = found.object;
+  if (hasOwn_(data, "name")) {
+    var nextName = String(data.name || "").trim();
+    if (nextName.length < 2 || nextName.length > 80) throw new Error("O nome deve ter entre 2 e 80 caracteres.");
+    if (normalizeAccountName_(nextName) !== normalizeAccountName_(user.name)) {
+      var normalizedName = normalizeAccountName_(nextName);
+      if (readRecords_(SHEETS.USERS, HEADERS.USERS).some(function (existing) {
+        return String(existing.id) !== String(userId) && normalizeAccountName_(existing.name) === normalizedName;
+      })) throw new Error("Já existe uma conta com este nome.");
+    }
+    user.name = nextName;
+  }
+  if (hasOwn_(data, "bio")) user.bio = data.bio;
+  if (hasOwn_(data, "photo_url")) user.photo_url = data.photo_url;
+
+  writeRecord_(found.sheet, found.rowIndex, HEADERS.USERS, user);
+  return user;
+}
+
+function getMedals(userId) {
+  return readRecords_(SHEETS.MEDALS, HEADERS.MEDALS).filter(function (medal) {
+    return String(medal.user_id) === String(userId);
+  });
+}
+
+function addMedal(data) {
+  var medal = {
+    id: generateId_("medal"),
+    user_id: requireParam_(data, "userId"),
+    medal_name: requireEitherParam_(data, ["medal_name", "medalName"]),
+    date: optionalParam_(data, "date", timestamp_())
+  };
+  appendRecord_(SHEETS.MEDALS, HEADERS.MEDALS, medal);
+  return medal;
+}
+
+function awardMedalIfMissing_(userId, medalName, message) {
+  var exists = getMedals(userId).some(function (medal) {
+    return String(medal.medal_name) === String(medalName);
+  });
+  if (exists) return null;
+
+  var medal = addMedal({ userId: userId, medal_name: medalName, date: timestamp_() });
+  if (message) createNotification({ userId: userId, message: message, read: false });
+  return medal;
+}
+
+function getNotifications(userId) {
+  return readRecords_(SHEETS.NOTIFICATIONS, HEADERS.NOTIFICATIONS)
+    .filter(function (notification) { return String(notification.user_id) === String(userId); })
+    .map(normalizeNotification_)
+    .sort(function (a, b) { return String(b.timestamp).localeCompare(String(a.timestamp)); });
+}
+
+function getUnreadNotificationsCount(userId) {
+  return {
+    unreadCount: getNotifications(userId).filter(function (notification) {
+      return !notification.read;
+    }).length
+  };
+}
+
+function createNotification(data) {
+  var notification = {
+    id: generateId_("notification"),
+    user_id: requireParam_(data, "userId"),
+    message: requireParam_(data, "message"),
+    read: hasOwn_(data, "read") ? toBoolean_(data.read) : false,
+    timestamp: optionalParam_(data, "timestamp", timestamp_())
+  };
+  appendRecord_(SHEETS.NOTIFICATIONS, HEADERS.NOTIFICATIONS, notification);
+  return normalizeNotification_(notification);
+}
+
+function markNotificationRead(data) {
+  var notificationId = requireEitherParam_(data, ["notificationId", "id"]);
+  var found = findRecordById_(SHEETS.NOTIFICATIONS, HEADERS.NOTIFICATIONS, notificationId);
+  if (!found) throw new Error("Notification not found: " + notificationId);
+  if (hasOwn_(data, "userId") && String(found.object.user_id) !== String(data.userId)) {
+    throw new Error("Notification does not belong to user: " + data.userId);
+  }
+  found.object.read = true;
+  writeRecord_(found.sheet, found.rowIndex, HEADERS.NOTIFICATIONS, found.object);
+  return normalizeNotification_(found.object);
+}
+
+function markAllNotificationsRead(data) {
+  var userId = requireParam_(data, "userId");
+  var sheet = getSheet_(SHEETS.NOTIFICATIONS, HEADERS.NOTIFICATIONS);
+  var values = getDataRows_(sheet, HEADERS.NOTIFICATIONS);
+  var updated = 0;
+
+  for (var i = 0; i < values.length; i++) {
+    var object = rowToObject_(HEADERS.NOTIFICATIONS, values[i]);
+    if (String(object.user_id) === String(userId) && !toBoolean_(object.read)) {
+      object.read = true;
+      writeRecord_(sheet, i + 2, HEADERS.NOTIFICATIONS, object);
+      updated++;
+    }
+  }
+  return { updated: updated };
+}
+
+function createLessonPlan(data) {
+  var userId = requireParam_(data, "userId");
+  var plan = {
+    id: generateId_("lesson"),
+    user_id: userId,
+    student_name: requireEitherParam_(data, ["student_name", "studentName"]),
+    book: optionalParam_(data, "book", ""),
+    lesson: optionalParam_(data, "lesson", ""),
+    objectives: stringifyMaybe_(optionalParam_(data, "objectives", "")),
+    check_time: optionalParam_(data, "check_time", optionalParam_(data, "checkTime", "")),
+    notes: optionalParam_(data, "notes", ""),
+    created_at: timestamp_(),
+    updated_at: timestamp_()
+  };
+  appendRecord_(SHEETS.LESSON_PLANS, HEADERS.LESSON_PLANS, plan);
+  addPoints_(userId, POINTS.LESSON_PLAN);
+  awardMedalIfMissing_(userId, "first_lesson", "Badge unlocked: first class planned.");
+  createNotification({ userId: userId, message: "Lesson plan saved: " + plan.student_name, read: false });
+  return plan;
+}
+
+function saveClassPlan(data) {
+  var title = optionalParam_(data, "title", "Class Plan");
+  return createLessonPlan({
+    userId: requireParam_(data, "userId"),
+    student_name: title,
+    book: "Turma",
+    lesson: "",
+    objectives: optionalParam_(data, "alunos_json", ""),
+    check_time: "Turma",
+    notes: requireParam_(data, "output")
+  });
+}
+
+function getLessonPlans(userId, params) {
+  var limit = parseInt(optionalParam_(params, "limit", "50"), 10) || 50;
+  var offset = parseInt(optionalParam_(params, "offset", "0"), 10) || 0;
+  return readRecords_(SHEETS.LESSON_PLANS, HEADERS.LESSON_PLANS)
+    .filter(function (plan) { return String(plan.user_id) === String(userId); })
+    .sort(function (a, b) { return String(b.created_at).localeCompare(String(a.created_at)); })
+    .slice(offset, offset + limit);
+}
+
+function getLessonPlan(id, userId) {
+  var found = findRecordById_(SHEETS.LESSON_PLANS, HEADERS.LESSON_PLANS, id);
+  if (!found) return null;
+  if (userId && String(found.object.user_id) !== String(userId)) return null;
+  return found.object;
+}
+
+function updateLessonPlan(data) {
+  var id = requireParam_(data, "id");
+  var userId = requireParam_(data, "userId");
+  var found = findRecordById_(SHEETS.LESSON_PLANS, HEADERS.LESSON_PLANS, id);
+  if (!found || String(found.object.user_id) !== String(userId)) {
+    throw new Error("Lesson plan not found: " + id);
+  }
+
+  var plan = found.object;
+  if (hasOwn_(data, "student_name") || hasOwn_(data, "studentName")) plan.student_name = data.student_name || data.studentName;
+  if (hasOwn_(data, "book")) plan.book = data.book;
+  if (hasOwn_(data, "lesson")) plan.lesson = data.lesson;
+  if (hasOwn_(data, "objectives")) plan.objectives = stringifyMaybe_(data.objectives);
+  if (hasOwn_(data, "check_time") || hasOwn_(data, "checkTime")) plan.check_time = data.check_time || data.checkTime;
+  if (hasOwn_(data, "notes")) plan.notes = data.notes;
+  plan.updated_at = timestamp_();
+
+  writeRecord_(found.sheet, found.rowIndex, HEADERS.LESSON_PLANS, plan);
+  return plan;
+}
+
+function deleteLessonPlan(data) {
+  var id = requireParam_(data, "id");
+  var userId = requireParam_(data, "userId");
+  var found = findRecordById_(SHEETS.LESSON_PLANS, HEADERS.LESSON_PLANS, id);
+  if (!found || String(found.object.user_id) !== String(userId)) {
+    throw new Error("Lesson plan not found: " + id);
+  }
+  found.sheet.deleteRow(found.rowIndex);
+  return { deleted: true, id: id };
+}
+
+function getRewards(userId) {
+  var reward = ensureRewardRecord_(userId);
+  var medals = getMedals(userId);
+  var points = Number(reward.points || 0);
+  return {
+    userId: userId,
+    points: points,
+    level: calculateLevel_(points),
+    badges: medals.map(function (medal) {
+      return {
+        id: medal.medal_name,
+        name: medal.medal_name,
+        description: "Unlocked on " + medal.date,
+        icon: "Badge",
+        date: medal.date
+      };
+    }),
+    badgeIds: medals.map(function (medal) { return medal.medal_name; }),
+    last_bonus_date: reward.last_bonus_date || ""
+  };
+}
+
+function claimDailyBonus(data) {
+  var userId = requireParam_(data, "userId");
+  var reward = ensureRewardRecord_(userId);
+  var today = timestamp_().slice(0, 10);
+  if (String(reward.last_bonus_date || "") === today) {
+    return { bonusAwarded: false, message: "Bonus already claimed today" };
+  }
+
+  reward.points = Number(reward.points || 0) + POINTS.DAILY_BONUS;
+  reward.last_bonus_date = today;
+  reward.updated_at = timestamp_();
+  writeRewardRecord_(reward);
+  awardMedalIfMissing_(userId, "daily_bonus", "Badge unlocked: daily bonus.");
+  createNotification({ userId: userId, message: "Daily bonus: +" + POINTS.DAILY_BONUS + " points.", read: false });
+  return { bonusAwarded: true, points: POINTS.DAILY_BONUS };
+}
+
+function getLeaderboard(params) {
+  var limit = parseInt(optionalParam_(params, "limit", "10"), 10) || 10;
+  var users = getUsers();
+  return users.map(function (user) {
+    var rewards = getRewards(user.id);
+    return {
+      id: user.id,
+      name: user.name,
+      bio: user.bio || "",
+      points: rewards.points,
+      level: rewards.level,
+      badges: rewards.badges
+    };
+  }).sort(function (a, b) {
+    return b.points - a.points;
+  }).slice(0, limit).map(function (entry, index) {
+    entry.rank = index + 1;
+    return entry;
+  });
+}
+
+function createActivity(data) {
+  var userId = requireParam_(data, "userId");
+  var activity = {
+    id: generateId_("activity"),
+    user_id: userId,
+    title: requireParam_(data, "title"),
+    description: optionalParam_(data, "description", ""),
+    category: optionalParam_(data, "category", "general"),
+    file_url: optionalParam_(data, "file_url", optionalParam_(data, "fileUrl", "")),
+    file_name: optionalParam_(data, "file_name", optionalParam_(data, "fileName", "")),
+    file_type: optionalParam_(data, "file_type", optionalParam_(data, "fileType", "")),
+    likes: 0,
+    created_at: timestamp_()
+  };
+  appendRecord_(SHEETS.ACTIVITIES, HEADERS.ACTIVITIES, activity);
+  addPoints_(userId, POINTS.ACTIVITY_POST);
+  awardMedalIfMissing_(userId, "first_post", "Badge unlocked: first community post.");
+  createNotification({ userId: userId, message: "Community activity posted: " + activity.title, read: false });
+  return decorateActivity_(activity, userId);
+}
+
+function getActivities(params) {
+  var currentUserId = optionalParam_(params, "userId", "");
+  var limit = parseInt(optionalParam_(params, "limit", "20"), 10) || 20;
+  var offset = parseInt(optionalParam_(params, "offset", "0"), 10) || 0;
+  return readRecords_(SHEETS.ACTIVITIES, HEADERS.ACTIVITIES)
+    .sort(function (a, b) { return String(b.created_at).localeCompare(String(a.created_at)); })
+    .slice(offset, offset + limit)
+    .map(function (activity) { return decorateActivity_(activity, currentUserId); });
+}
+
+function getActivitiesByCategory(category, params) {
+  return getActivities({ userId: params.userId || "", limit: 9999, offset: 0 })
+    .filter(function (activity) { return String(activity.category) === String(category); })
+    .slice(Number(params.offset || 0), Number(params.offset || 0) + (Number(params.limit || 20)));
+}
+
+function getUserActivities(targetUserId, params) {
+  return getActivities({ userId: params.userId || "", limit: 9999, offset: 0 })
+    .filter(function (activity) { return String(activity.user_id) === String(targetUserId); })
+    .slice(Number(params.offset || 0), Number(params.offset || 0) + (Number(params.limit || 20)));
+}
+
+function likeActivity(data) {
+  var userId = requireParam_(data, "userId");
+  var activityId = requireEitherParam_(data, ["activityId", "id"]);
+  var activityFound = findRecordById_(SHEETS.ACTIVITIES, HEADERS.ACTIVITIES, activityId);
+  if (!activityFound) throw new Error("Activity not found: " + activityId);
+
+  var existing = findActivityLike_(activityId, userId);
+  if (existing) return { liked: false, alreadyLiked: true };
+
+  appendRecord_(SHEETS.ACTIVITY_LIKES, HEADERS.ACTIVITY_LIKES, {
+    id: generateId_("like"),
+    activity_id: activityId,
+    user_id: userId,
+    created_at: timestamp_()
+  });
+
+  activityFound.object.likes = Number(activityFound.object.likes || 0) + 1;
+  writeRecord_(activityFound.sheet, activityFound.rowIndex, HEADERS.ACTIVITIES, activityFound.object);
+
+  if (String(activityFound.object.user_id) !== String(userId)) {
+    addPoints_(activityFound.object.user_id, POINTS.LIKE_RECEIVED);
+    awardMedalIfMissing_(userId, "first_like_given", "Badge unlocked: first like given.");
+    awardMedalIfMissing_(activityFound.object.user_id, "first_like_received", "Badge unlocked: first like received.");
+    var liker = getUser(userId);
+    createNotification({
+      userId: activityFound.object.user_id,
+      message: (liker && liker.name ? liker.name : "A teacher") + " liked your activity: " + activityFound.object.title,
+      read: false
+    });
+  }
+  return { liked: true };
+}
+
+function unlikeActivity(data) {
+  var userId = requireParam_(data, "userId");
+  var activityId = requireEitherParam_(data, ["activityId", "id"]);
+  var likeFound = findActivityLike_(activityId, userId);
+  if (!likeFound) return { unliked: false };
+
+  likeFound.sheet.deleteRow(likeFound.rowIndex);
+  var activityFound = findRecordById_(SHEETS.ACTIVITIES, HEADERS.ACTIVITIES, activityId);
+  if (activityFound) {
+    activityFound.object.likes = Math.max(0, Number(activityFound.object.likes || 0) - 1);
+    writeRecord_(activityFound.sheet, activityFound.rowIndex, HEADERS.ACTIVITIES, activityFound.object);
+  }
+  return { unliked: true };
+}
+
+function deleteActivity(data) {
+  var userId = requireParam_(data, "userId");
+  var activityId = requireEitherParam_(data, ["activityId", "id"]);
+  var found = findRecordById_(SHEETS.ACTIVITIES, HEADERS.ACTIVITIES, activityId);
+  if (!found || String(found.object.user_id) !== String(userId)) {
+    throw new Error("Activity not found: " + activityId);
+  }
+  found.sheet.deleteRow(found.rowIndex);
+  deleteLikesForActivity_(activityId);
+  return { deleted: true, id: activityId };
+}
+
+function decorateActivity_(activity, currentUserId) {
+  var user = getUser(activity.user_id) || {};
+  return {
+    id: activity.id,
+    user_id: activity.user_id,
+    created_by: activity.user_id,
+    title: activity.title,
+    description: activity.description,
+    category: activity.category,
+    file_url: activity.file_url,
+    file_name: activity.file_name,
+    file_type: activity.file_type,
+    likes: Number(activity.likes || 0),
+    created_at: activity.created_at,
+    creator_name: user.name || "Teacher",
+    creator_bio: user.bio || "",
+    creator_avatar_url: "",
+    likedByCurrentUser: currentUserId ? Boolean(findActivityLike_(activity.id, currentUserId)) : false
+  };
+}
+
+function addPoints_(userId, points) {
+  var reward = ensureRewardRecord_(userId);
+  reward.points = Number(reward.points || 0) + Number(points || 0);
+  reward.updated_at = timestamp_();
+  writeRewardRecord_(reward);
+  awardPointBadges_(userId, reward.points);
+  return reward;
+}
+
+function awardPointBadges_(userId, points) {
+  if (points >= 50) awardMedalIfMissing_(userId, "points_50", "Badge unlocked: 50 points.");
+  if (points >= 150) awardMedalIfMissing_(userId, "points_150", "Badge unlocked: 150 points.");
+  if (points >= 300) awardMedalIfMissing_(userId, "points_300", "Badge unlocked: 300 points.");
+  if (points >= 500) awardMedalIfMissing_(userId, "points_500", "Badge unlocked: 500 points.");
+}
+
+function calculateLevel_(points) {
+  points = Number(points || 0);
+  if (points < 50) return "Beginner";
+  if (points < 150) return "Intermediate";
+  if (points < 300) return "Advanced";
+  if (points < 500) return "Expert";
+  return "Master";
+}
+
+function ensureRewardRecord_(userId) {
+  var found = findRewardRecord_(userId);
+  if (found) return found.object;
+
+  var reward = {
+    user_id: userId,
+    points: 0,
+    last_bonus_date: "",
+    updated_at: timestamp_()
+  };
+  appendRecord_(SHEETS.REWARDS, HEADERS.REWARDS, reward);
+  return reward;
+}
+
+function findRewardRecord_(userId) {
+  var sheet = getSheet_(SHEETS.REWARDS, HEADERS.REWARDS);
+  var rows = getDataRows_(sheet, HEADERS.REWARDS);
+  for (var i = 0; i < rows.length; i++) {
+    var object = rowToObject_(HEADERS.REWARDS, rows[i]);
+    if (String(object.user_id) === String(userId)) {
+      return { sheet: sheet, rowIndex: i + 2, object: object };
+    }
+  }
+  return null;
+}
+
+function writeRewardRecord_(reward) {
+  var found = findRewardRecord_(reward.user_id);
+  if (!found) appendRecord_(SHEETS.REWARDS, HEADERS.REWARDS, reward);
+  else writeRecord_(found.sheet, found.rowIndex, HEADERS.REWARDS, reward);
+}
+
+function findActivityLike_(activityId, userId) {
+  var sheet = getSheet_(SHEETS.ACTIVITY_LIKES, HEADERS.ACTIVITY_LIKES);
+  var rows = getDataRows_(sheet, HEADERS.ACTIVITY_LIKES);
+  for (var i = 0; i < rows.length; i++) {
+    var object = rowToObject_(HEADERS.ACTIVITY_LIKES, rows[i]);
+    if (String(object.activity_id) === String(activityId) && String(object.user_id) === String(userId)) {
+      return { sheet: sheet, rowIndex: i + 2, object: object };
+    }
+  }
+  return null;
+}
+
+function deleteLikesForActivity_(activityId) {
+  var sheet = getSheet_(SHEETS.ACTIVITY_LIKES, HEADERS.ACTIVITY_LIKES);
+  var rows = getDataRows_(sheet, HEADERS.ACTIVITY_LIKES);
+  for (var i = rows.length - 1; i >= 0; i--) {
+    var object = rowToObject_(HEADERS.ACTIVITY_LIKES, rows[i]);
+    if (String(object.activity_id) === String(activityId)) sheet.deleteRow(i + 2);
+  }
+}
+
+function ensureAllSheets_() {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    Object.keys(SHEETS).forEach(function (key) {
+      ensureSheet_(SHEETS[key], HEADERS[key]);
+    });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function getSpreadsheet_() {
+  return SpreadsheetApp.openById(SPREADSHEET_ID);
+}
+
+function ensureSheet_(sheetName, headers) {
+  var ss = getSpreadsheet_();
+  var sheet = ss.getSheetByName(sheetName);
+  if (!sheet) {
+    var allSheets = ss.getSheets();
+    for (var i = 0; i < allSheets.length; i++) {
+      if (String(allSheets[i].getName()).trim() === sheetName) {
+        sheet = allSheets[i];
+        break;
+      }
+    }
+  }
+  if (!sheet) {
+    try {
+      sheet = ss.insertSheet(sheetName);
+    } catch (err) {
+      sheet = ss.getSheetByName(sheetName);
+      if (!sheet) throw err;
+    }
+  }
+  if (sheet.getLastRow() === 0) {
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    return sheet;
+  }
+  if (sheet.getMaxColumns() < headers.length) {
+    sheet.insertColumnsAfter(sheet.getMaxColumns(), headers.length - sheet.getMaxColumns());
+  }
+  var existingWidth = headers.length;
+  var existing = sheet.getRange(1, 1, 1, existingWidth).getDisplayValues()[0];
+  var isEmpty = existing.every(function (value) { return String(value || "").trim() === ""; });
+  if (isEmpty) sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  else {
+    var compatibleHeaders = true;
+    var firstMissingHeader = -1;
+    for (var existingIndex = 0; existingIndex < existing.length; existingIndex++) {
+      var existingHeader = String(existing[existingIndex] || "").trim();
+      if (!existingHeader && firstMissingHeader < 0) firstMissingHeader = existingIndex;
+      if (existingHeader && (firstMissingHeader >= 0 || existingHeader !== headers[existingIndex])) {
+        compatibleHeaders = false;
+        break;
+      }
+    }
+    if (compatibleHeaders && firstMissingHeader >= 0) {
+      for (var headerIndex = firstMissingHeader; headerIndex < headers.length; headerIndex++) {
+        var headerCell = String(sheet.getRange(1, headerIndex + 1).getDisplayValue() || "").trim();
+        if (headerCell && headerCell !== headers[headerIndex]) {
+          compatibleHeaders = false;
+          break;
+        }
+      }
+      if (compatibleHeaders) {
+        for (var fillIndex = firstMissingHeader; fillIndex < headers.length; fillIndex++) {
+          sheet.getRange(1, fillIndex + 1).setValue(headers[fillIndex]);
+        }
+      }
+    }
+  }
+  return sheet;
+}
+
+function normalizeEmail_(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function normalizeAccountName_(value) {
+  return String(value || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+function getSheet_(sheetName, headers) {
+  var sheet = ensureSheet_(sheetName, headers);
+  assertHeaders_(sheet, headers);
+  return sheet;
+}
+
+function assertHeaders_(sheet, expectedHeaders) {
+  var actualHeaders = sheet.getRange(1, 1, 1, expectedHeaders.length).getDisplayValues()[0];
+  for (var i = 0; i < expectedHeaders.length; i++) {
+    if (String(actualHeaders[i]).trim() !== expectedHeaders[i]) {
+      throw new Error("Invalid headers for sheet '" + sheet.getName() + "'. Expected: " + expectedHeaders.join(" | "));
+    }
+  }
+}
+
+function getDataRows_(sheet, headers) {
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+  return sheet.getRange(2, 1, lastRow - 1, headers.length).getValues();
+}
+
+function readRecords_(sheetName, headers) {
+  var sheet = getSheet_(sheetName, headers);
+  return getDataRows_(sheet, headers)
+    .filter(function (row) { return !isBlankRow_(row); })
+    .map(function (row) { return rowToObject_(headers, row); });
+}
+
+function appendRecord_(sheetName, headers, record) {
+  var sheet = getSheet_(sheetName, headers);
+  sheet.appendRow(objectToRow_(headers, record));
+}
+
+function findRecordById_(sheetName, headers, id) {
+  var sheet = getSheet_(sheetName, headers);
+  var values = getDataRows_(sheet, headers);
+  for (var i = 0; i < values.length; i++) {
+    var object = rowToObject_(headers, values[i]);
+    if (String(object.id) === String(id)) {
+      return { sheet: sheet, rowIndex: i + 2, object: object };
+    }
+  }
+  return null;
+}
+
+function writeRecord_(sheet, rowIndex, headers, record) {
+  sheet.getRange(rowIndex, 1, 1, headers.length).setValues([objectToRow_(headers, record)]);
+}
+
+function rowToObject_(headers, row) {
+  var object = {};
+  for (var i = 0; i < headers.length; i++) object[headers[i]] = normalizeCell_(row[i]);
+  return object;
+}
+
+function objectToRow_(headers, object) {
+  return headers.map(function (header) {
+    return hasOwn_(object, header) ? object[header] : "";
+  });
+}
+
+function normalizeCell_(value) {
+  if (value instanceof Date) return value.toISOString();
+  if (value === null || typeof value === "undefined") return "";
+  return value;
+}
+
+function normalizeNotification_(notification) {
+  notification.read = toBoolean_(notification.read);
+  notification.created_at = notification.timestamp;
+  notification.title = "Notification";
+  notification.type = "info";
+  return notification;
+}
+
+function parsePostBody_(e) {
+  if (!e || !e.postData || !e.postData.contents) return {};
+  var type = String(e.postData.type || "").toLowerCase();
+  if (type.indexOf("application/json") !== -1) return JSON.parse(e.postData.contents);
+  if (type.indexOf("application/x-www-form-urlencoded") !== -1) {
+    var values = {};
+    e.postData.contents.split("&").forEach(function (pair) {
+      if (!pair) return;
+      var separator = pair.indexOf("=");
+      var rawKey = separator < 0 ? pair : pair.substring(0, separator);
+      var rawValue = separator < 0 ? "" : pair.substring(separator + 1);
+      var key = decodeURIComponent(rawKey.replace(/\+/g, " "));
+      if (!key) return;
+      values[key] = decodeURIComponent(rawValue.replace(/\+/g, " "));
+    });
+    return values;
+  }
+  return {};
+}
+
+function mergeObjects_(first, second) {
+  var result = {};
+  var key;
+  for (key in first) if (hasOwn_(first, key)) result[key] = first[key];
+  for (key in second) if (hasOwn_(second, key)) result[key] = second[key];
+  return result;
+}
+
+function requireParam_(data, key) {
+  if (!hasOwn_(data, key) || data[key] === "") throw new Error("Missing required parameter: " + key);
+  return data[key];
+}
+
+function requireEitherParam_(data, keys) {
+  for (var i = 0; i < keys.length; i++) {
+    if (hasOwn_(data, keys[i]) && data[keys[i]] !== "") return data[keys[i]];
+  }
+  throw new Error("Missing required parameter. Expected one of: " + keys.join(", "));
+}
+
+function optionalParam_(data, key, fallback) {
+  return hasOwn_(data, key) ? data[key] : fallback;
+}
+
+function hasOwn_(object, key) {
+  return Object.prototype.hasOwnProperty.call(object || {}, key);
+}
+
+function isBlankRow_(row) {
+  for (var i = 0; i < row.length; i++) {
+    if (row[i] !== "" && row[i] !== null) return false;
+  }
+  return true;
+}
+
+function stringifyMaybe_(value) {
+  if (typeof value === "string") return value;
+  return JSON.stringify(value || "");
+}
+
+function generateId_(prefix) {
+  return prefix + "_" + new Date().getTime() + "_" + Math.floor(Math.random() * 1000000);
+}
+
+function timestamp_() {
+  return new Date().toISOString();
+}
+
+function toBoolean_(value) {
+  if (value === true) return true;
+  if (value === false) return false;
+  if (typeof value === "number") return value !== 0;
+  var normalized = String(value).toLowerCase().trim();
+  return normalized === "true" || normalized === "1" || normalized === "yes";
+}
+
+function withLock_(callback) {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    return callback();
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function success_(data) {
+  return json_({ success: true, data: data });
+}
+
+function failure_(err, requestId) {
+  var payload = { success: false, error: err && err.message ? err.message : String(err) };
+  var safeId = safeRequestId_(requestId || (err && err.requestId));
+  if (safeId) payload.requestId = safeId;
+  return json_(payload);
+}
+
+function safeRequestId_(value) {
+  var requestId = String(value || "");
+  return /^[a-zA-Z0-9_-]{8,80}$/.test(requestId) ? requestId : "";
+}
+
+function safeDiagnosticToken_(value) {
+  var token = String(value || "unknown");
+  return /^[a-zA-Z0-9_-]{1,80}$/.test(token) ? token : "unknown";
+}
+
+function safeDiagnosticError_(err) {
+  var message = String(err && err.message || err || "Unknown error");
+  message = message.replace(/AQ\.[A-Za-z0-9_-]{20,}/g, "[REDACTED]");
+  return message.replace(/[\r\n\t]+/g, " ").slice(0, 500);
+}
+
+function json_(payload) {
+  return ContentService
+    .createTextOutput(JSON.stringify(payload))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+// ===== Standalone planner interface (formerly formulario.html) =====
+var PLANNER_HTML = "<!DOCTYPE html>\n<html>\n<head>\n<base target=\"_top\">\n<link href=\"https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap\" rel=\"stylesheet\">\n<style>\n*{margin:0;padding:0;box-sizing:border-box;}\nbody{background:#40466d;color:white;font-family:'Poppins',sans-serif;min-height:100vh;display:flex;justify-content:center;align-items:center;padding:20px;}\n.container{max-width:1200px;width:100%;height:100vh;display:flex;flex-direction:column;padding:20px;background:linear-gradient(135deg,#4a5276,#2b304b);border-radius:15px;box-shadow:0 8px 20px rgba(0,0,0,0.4);}\n.title{font-weight:300;font-size:2.7rem;text-align:center;margin-bottom:30px;letter-spacing:2px;text-shadow:0 0 8px rgba(255,255,255,0.3);}\n.main-content{flex:1;display:grid;grid-template-columns:1fr auto 1fr;gap:30px;align-items:start;}\n.input-table{border:2px solid #fff;border-radius:10px;background:rgba(255,255,255,0.07);box-shadow:inset 0 0 10px rgba(255,255,255,0.1);max-height:450px;overflow-y:auto;}\ntable{width:100%;border-collapse:collapse;table-layout:fixed;}\nth,td{border:1px solid rgba(255,255,255,0.2);padding:10px 8px;height:42px;font-weight:300;text-align:center;word-wrap:break-word;}\nth{background:rgba(255,255,255,0.15);font-weight:600;letter-spacing:1px;text-transform:uppercase;}\n.objectives-cell { text-align: left; white-space: normal; font-size: 0.85rem; line-height: 1.2; padding: 10px 12px; }\n.editable-cell{width:100%;height:100%;background:transparent;border:none;color:white;font-family:inherit;font-size:0.95rem;outline:none;cursor:text;padding:3px 5px;user-select:text;}\n.editable-cell:empty:before{content:attr(data-placeholder);color:rgba(255,255,255,0.3);pointer-events:none;user-select:none;}\n.button-container{display:flex;flex-direction:column;align-items:center;gap:15px;padding:0 10px;min-width:180px;}\n.generate-btn{background:#ff4b4b;color:white;border:none;padding:14px 40px;border-radius:30px;font-size:1.15rem;cursor:pointer;font-weight:600;box-shadow:0 4px 10px rgba(255,75,75,0.6);transition:all .3s ease;width:100%;max-width:220px;}\n.generate-btn:hover,.generate-btn:focus{background:#e03f3f;transform:scale(1.07);box-shadow:0 6px 18px rgba(224,63,63,0.8);outline:none;}\n.logo{width:120px;filter:drop-shadow(0 0 6px rgba(255,255,255,0.25));user-select:none;}\n.horario-container{margin-top:12px;width:100%;max-width:220px;display:flex;flex-direction:column;align-items:center;gap:6px;}\nlabel[for=\"horario\"]{font-weight:600;font-size:1rem;letter-spacing:0.7px;color:#ffdede;text-shadow:0 0 3px rgba(255,75,75,0.7);user-select:none;}\ninput[type=\"time\"]{width:100%;padding:8px 12px;border-radius:25px;border:2px solid #ff4b4b;background:rgba(255,75,75,0.15);color:white;font-size:1rem;font-weight:500;font-family:'Poppins',sans-serif;box-shadow:0 2px 8px rgba(255,75,75,0.3);transition:border-color .3s ease,background-color .3s ease;cursor:pointer;text-align:center;}\ninput[type=\"time\"]:focus{border-color:#ff1f1f;background:rgba(255,31,31,0.35);outline:none;box-shadow:0 0 10px #ff1f1f;}\n#output{width:100%;font-family:monospace;padding:12px 14px;margin:10px 0;border-radius:12px;border:none;resize:vertical;min-height:120px;background:rgba(255,255,255,0.1);color:white;box-shadow:inset 0 0 8px rgba(255,255,255,0.15);}\n#output:focus{outline:none;background:rgba(255,255,255,0.2);}\nlabel[for=\"output\"]{font-size:0.9rem;user-select:none;color:#f0eaeacc;font-weight:500;}\n.footer{font-size:9px;color:rgba(255,255,255,0.5);text-align:left;padding:5px 10px;user-select:none;margin-top:15px;}\n.input-table::-webkit-scrollbar{width:8px;height:8px;}\n.input-table::-webkit-scrollbar-thumb{background:rgba(255,75,75,0.5);border-radius:10px;}\n.input-table::-webkit-scrollbar-track{background:transparent;}\n#outputBody tr td:nth-child(4), #outputBody tr td:nth-child(5) { width: 40%; min-width: 250px;}\n#outputBody tr td:nth-child(3), #outputBody tr td:nth-child(4) { text-align: center;}\n#outputBody tr td:nth-child(5) > div { text-align: left; font-size: 0.85rem; line-height: 1.3;}\n.hidden-objectives { display: none; }\n</style>\n</head>\n<body>\n\n<div class=\"container\">\n\n<h1 class=\"title\">Class Planning Program</h1>\n\n<div class=\"main-content\">\n\n<div class=\"input-table\">\n<table>\n<thead><tr><th>NAME</th><th>BOOK</th><th>LESSON</th></tr></thead>\n<tbody id=\"inputBody\"></tbody>\n</table>\n</div>\n\n<div class=\"button-container\">\n<button class=\"generate-btn\" onclick=\"processData()\">Gerar Aula</button>\n<button class=\"generate-btn\" onclick=\"toggleObjectivesColumn()\">Mostrar/Ocultar Learning Objectives</button>\n\n<img src=\"https://cdn.wizard.com.br/wp-content/uploads/2019/10/01155611/logo-aguia-wizard-by-pearson-idiomas.png\" class=\"logo\" alt=\"Wizard logo\">\n\n<div class=\"horario-container\">\n<label for=\"horario\">Horário da aula</label>\n<input type=\"time\" id=\"horario\">\n</div>\n</div>\n\n<div class=\"input-table\">\n<table>\n<thead>\n<tr>\n<th>NAME</th>\n<th>BOOK</th>\n<th>LESSON</th>\n<th>CHECKING TIME</th>\n<th>LEARNING OBJECTIVES</th>\n</tr>\n</thead>\n<tbody id=\"outputBody\"></tbody>\n</table>\n</div>\n\n</div>\n\n<div style=\"margin-top:20px;\">\n<label for=\"output\">Copiar resultado para Excel:</label>\n<textarea id=\"output\" readonly rows=\"5\"></textarea>\n<button onclick=\"copiarResultado()\" class=\"generate-btn\" style=\"padding:8px 20px;font-size:1rem;\">Copiar para Excel</button>\n</div>\n\n<div class=\"footer\">Eduardo Moretti</div>\n\n</div>\n\n<script>\nlet objectivesVisible = true;\n\nfunction initTables() {\n    const inB = document.getElementById('inputBody'), outB = document.getElementById('outputBody');\n    for(let i=0;i<10;i++){\n        const trIn = document.createElement('tr');\n        for(let j=0;j<3;j++){\n            const td = document.createElement('td'), div = document.createElement('div');\n            div.className='editable-cell'; div.contentEditable = true;\n            div.setAttribute('data-placeholder', j===0?'Name':j===1?'Book':'Lesson');\n            td.appendChild(div); trIn.appendChild(td);\n        }\n        inB.appendChild(trIn);\n\n        const trOut = document.createElement('tr');\n        for(let j=0;j<5;j++){\n            const td = document.createElement('td'), div = document.createElement('div');\n            div.className='editable-cell'; div.contentEditable = false;\n            if(j===4) td.classList.add('objectives-cell'); \n            td.appendChild(div); trOut.appendChild(td);\n        }\n        outB.appendChild(trOut);\n    }\n}\n\nfunction handlePaste(e) {\n    e.preventDefault();\n    const text = (e.clipboardData||window.clipboardData).getData('text'),\n    rows = text.split('\\n').filter(r=>r.trim()),\n    cells= document.querySelectorAll('#inputBody .editable-cell');\n    let idx=0;\n    rows.forEach(r=>r.split('\\t').forEach(col=>{\n        if(idx<cells.length) cells[idx].textContent = col.trim();\n        idx++;\n    }));\n}\n\nfunction processData() {\n    const horario = document.getElementById('horario').value;\n    const lines = Array.from(document.querySelectorAll('#inputBody tr'))\n        .map(tr=>{ const c = tr.querySelectorAll('.editable-cell');\n        return [c[0].textContent.trim(),c[1].textContent.trim(),c[2].textContent.trim()].join('\\t'); })\n        .filter(l=>l.split('\\t').some(x=>x));\n    google.script.run.withSuccessHandler(fillOutput).processarTexto(lines.join('\\n'), horario, objectivesVisible);\n}\n\nfunction fillOutput(res) {\n    const textarea = document.getElementById('output');\n    const outTbl = document.getElementById('outputBody');\n    const trimmed = res.trim();\n    textarea.value = trimmed;\n    const lines = trimmed.split('\\n');\n    outTbl.innerHTML = '';\n    lines.forEach((line, idx)=>{\n        const l = line.trim();\n        if(!l) return;\n        const parts = l.split('\\t');\n        const tr = document.createElement('tr');\n        parts.forEach((text, partIdx)=>{\n            const td = document.createElement('td');\n            const div = document.createElement('div');\n            div.className='editable-cell'; div.contentEditable = false; div.textContent = text;\n            if(partIdx===4) td.classList.add('objectives-cell');\n            if(partIdx===4 && !objectivesVisible) td.classList.add('hidden-objectives');\n            td.appendChild(div); tr.appendChild(td);\n        });\n        outTbl.appendChild(tr);\n    });\n}\n\nfunction toggleObjectivesColumn() {\n    objectivesVisible = !objectivesVisible;\n    const rows = document.querySelectorAll('#outputBody tr');\n    rows.forEach(tr=>{\n        const tds = tr.querySelectorAll('td');\n        if(tds.length >= 5){ // garante que existe a coluna 5 (LEARNING OBJECTIVES)\n            tds[4].classList.toggle('hidden-objectives', !objectivesVisible);\n        }\n    });\n}\n\nfunction copiarResultado() {\n    const out=document.getElementById('output');\n    out.select(); document.execCommand('copy');\n    alert('Copiado! Agora cole no Excel.');\n}\n\ndocument.addEventListener('DOMContentLoaded',()=>{\n    initTables();\n    document.getElementById('inputBody').addEventListener('paste', handlePaste);\n});\n</script>\n\n</body>\n</html>\n";

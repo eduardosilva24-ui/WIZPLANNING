@@ -20,9 +20,9 @@ function withAvatarUrl(req, user) {
 export const authController = {
   async register(req, res, next) {
     try {
-      const { name, email, password, role } = req.body;
+      const { name, email, password } = req.body;
 
-      const user = await authService.register(name, email, password, role || 'teacher');
+      const user = await authService.register(name, email, password);
       res.status(201).json({ message: 'User registered successfully', user });
     } catch (err) {
       next(err);

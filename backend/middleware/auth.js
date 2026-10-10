@@ -30,6 +30,10 @@ export const adminMiddleware = (req, res, next) => {
 export const errorHandler = (err, req, res, next) => {
   console.error('Error:', err);
 
+  if (err.status === 400 || err.status === 409) {
+    return res.status(err.status).json({ error: err.message });
+  }
+
   if (err.code === '23505' || err.message.includes('UNIQUE constraint failed')) {
     return res.status(409).json({ error: err.message });
   }

@@ -9,6 +9,7 @@ RUN npm install --omit=dev
 COPY backend ./backend
 COPY frontend ./frontend
 COPY shared ./shared
+COPY index.html main.css gas-planner.css animations.css ./
 
 RUN mkdir -p database uploads
 

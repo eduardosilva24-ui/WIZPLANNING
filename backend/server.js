@@ -11,6 +11,7 @@ import lessonPlanRoutes from './routes/lessonPlan.js';
 import rewardRoutes from './routes/reward.js';
 import activityRoutes from './routes/activity.js';
 import notificationRoutes from './routes/notification.js';
+import aiRoutes from './routes/ai.js';
 import { activityController } from './controllers/activityController.js';
 import { authController } from './controllers/authController.js';
 
@@ -42,7 +43,10 @@ app.use(cors({
 app.use(fileUpload());
 
 // Serve static files
-app.use(express.static(path.join(__dirname, '../frontend')));
+app.use('/frontend', express.static(path.join(__dirname, '../frontend')));
+app.get(['/main.css', '/gas-planner.css', '/animations.css'], (req, res) => {
+  res.sendFile(path.join(__dirname, '..', req.path));
+});
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 // Health check
@@ -57,8 +61,13 @@ app.use('/api/auth', authRoutes);
 app.use('/api/lesson-plans', authMiddleware, lessonPlanRoutes);
 app.use('/api/rewards', authMiddleware, rewardRoutes);
 app.use('/api/notifications', authMiddleware, notificationRoutes);
+app.use('/api/ai', authMiddleware, aiRoutes);
 app.get('/api/activities/:activityId/file', activityController.downloadActivityFile);
 app.use('/api/activities', authMiddleware, activityRoutes);
+
+app.get(['/', '/index.html'], (req, res) => {
+  res.sendFile(path.join(__dirname, '../index.html'));
+});
 
 // 404 for unmatched API routes
 app.use('/api/*', (req, res) => {
@@ -70,7 +79,7 @@ app.use(errorHandler);
 
 // SPA fallback
 app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, '../frontend/index.html'));
+  res.sendFile(path.join(__dirname, '../index.html'));
 });
 
 // Start server

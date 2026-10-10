@@ -19,7 +19,7 @@ function initTables() {
       const div = document.createElement('div');
       div.className = 'gas-editable-cell';
       div.contentEditable = 'true';
-      div.dataset.placeholder = j === 0 ? 'Name' : j === 1 ? 'Book' : 'Lesson';
+      div.dataset.placeholder = j === 0 ? 'Aluno' : j === 1 ? 'Livro' : 'Lição';
       td.appendChild(div);
       trIn.appendChild(td);
     }
@@ -40,6 +40,74 @@ function initTables() {
 
   // Save btn removed - auto-save implemented
   gasPlannerReady = true;
+}
+
+function setupAiReview() {
+  const reviewButton = document.getElementById('aiReviewBtn');
+  if (!reviewButton || reviewButton.dataset.bound) return;
+  reviewButton.dataset.bound = 'true';
+  reviewButton.addEventListener('click', reviewCurrentPlanWithAI);
+  document.getElementById('closeAiReviewBtn')?.addEventListener('click', () => {
+    document.getElementById('aiReviewPanel')?.classList.add('hidden');
+  });
+  document.getElementById('copyAiReviewBtn')?.addEventListener('click', copyAiReview);
+}
+
+function fitAiReviewOutput(output) {
+  if (!output) return;
+  const maxHeight = Math.max(300, Math.floor(window.innerHeight * 0.68));
+  output.style.height = 'auto';
+  output.style.height = `${Math.min(output.scrollHeight, maxHeight)}px`;
+  output.style.overflowY = output.scrollHeight > maxHeight ? 'auto' : 'hidden';
+}
+
+window.addEventListener('resize', () => {
+  const panel = document.getElementById('aiReviewPanel');
+  if (panel && !panel.classList.contains('hidden')) {
+    fitAiReviewOutput(document.getElementById('aiReviewOutput'));
+  }
+});
+
+async function reviewCurrentPlanWithAI() {
+  const planText = (currentOutput || document.getElementById('output')?.value || '').trim();
+  if (!planText) {
+    window.UI?.showToast('Gere um plano de aula antes de solicitar o relatório da IA.', 'warning');
+    return;
+  }
+
+  const button = document.getElementById('aiReviewBtn');
+  const panel = document.getElementById('aiReviewPanel');
+  const output = document.getElementById('aiReviewOutput');
+  try {
+    window.UI?.setButtonLoading(button, true, 'Analisando...');
+    panel?.classList.remove('hidden');
+    if (output) output.value = 'A Wiz IA está preparando o relatório pedagógico…';
+    fitAiReviewOutput(output);
+    const review = await window.API.reviewLessonWithAI(planText);
+    if (output) output.value = review.text || '';
+    fitAiReviewOutput(output);
+  } catch (error) {
+    if (output) output.value = '';
+    fitAiReviewOutput(output);
+    const requestReference = error.requestId ? ` (referência ${error.requestId})` : '';
+    window.UI?.showToast(`Não foi possível gerar o relatório: ${error.message}${requestReference}`, 'error');
+  } finally {
+    window.UI?.setButtonLoading(button, false);
+  }
+}
+
+async function copyAiReview() {
+  const output = document.getElementById('aiReviewOutput');
+  const text = output?.value?.trim();
+  if (!text) return window.UI?.showToast('Ainda não há relatório para copiar.', 'warning');
+  try {
+    await navigator.clipboard.writeText(text);
+    window.UI?.showToast('Relatório copiado.', 'success');
+  } catch {
+    output.select();
+    document.execCommand('copy');
+    window.UI?.showToast('Relatório copiado.', 'success');
+  }
 }
 
 document.getElementById('inputBody')?.addEventListener('paste', handlePaste);
@@ -86,6 +154,7 @@ function fillOutput(res) {
   const outBody = document.getElementById('outputBody');
   if (textarea) textarea.value = res;
   if (!outBody) return;
+  document.querySelector('.table-empty-note')?.classList.toggle('hidden', Boolean(String(res || '').trim()));
   outBody.innerHTML = '';
   res.split('\n').forEach(line => {
     if (!line.trim()) return;
@@ -127,4 +196,4 @@ window.loadSampleData = () => {
   window.UI?.showToast('Sample loaded');
 };
 
-window.LessonPlanner = { init() { initTables(); } };
+window.LessonPlanner = { init() { initTables(); setupAiReview(); } };

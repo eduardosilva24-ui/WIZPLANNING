@@ -1,7 +1,7 @@
 /**
  * Google Apps Script Lesson Planner — direct Node port.
- * Data: shared/learningObjectives.json, shared/Lessons.json (same blobs as GAS).
- * Do not edit the algorithm block manually; change fragments + re-run: npm run build:gas-node-planner
+ * Algorithm source: google-apps-script/Code.gs.
+ * Data: shared/learningObjectives.json and shared/Lessons.json.
  */
 import { readFileSync } from "fs";
 import { join, dirname } from "path";
@@ -33,8 +33,8 @@ export function extrairAlunosDoTexto(texto) {
   return alunos;
 }
 
-// Principal: texto + horário ("HH:mm") → NAME, BOOK, LESSON, OBJECTIVES, CHECK TIME
 export function processarTextoComHorario(texto, horarioStr) {
+
     // 1) Quebra o texto em linhas úteis
     const linhas = texto
         .trim()
@@ -51,7 +51,9 @@ export function processarTextoComHorario(texto, horarioStr) {
 
 
     const allLearningObjectives = learningObjectivesData;
+
     const livros = livrosData;
+
 
     const listaReviews = ["1111", "2222", "3333", "4444", "5555", "6666", "7777", "8888", "9999", "1010"];
 
@@ -133,18 +135,6 @@ export function processarTextoComHorario(texto, horarioStr) {
 
 
     // 4) Processa cada aluno
-
-alunos.forEach((a, i) => {
-  const seqOriginal = livros[a.livro];
-  if (!seqOriginal) return null;
-  else {
-    const seqCod = seqOriginal.map(x => normalizarReviewParaCodigo(x));
-    const atualCod = normalizarReviewParaCodigo(a.numeroRaw);
-    const idx = seqCod.indexOf(atualCod);
-    if (idx === -1) return null;
-    else {} 
-  }
-});
 
     let resultado = alunos.map(a => {
 
@@ -237,8 +227,7 @@ alunos.forEach((a, i) => {
 
         return { nome: a.nome, livro: a.livro, proximaLicao: proxFmt, objetivos: objetivos };
 
-}).filter(Boolean);
-
+    }).filter(Boolean);
 
 
     // 5) Ordena resultado
@@ -310,52 +299,6 @@ return linhasSaida.join("\n");
 }
 
 // Agora aceita texto e horário opcional (terceiro parâmetro ignorado — contrato do formulario.html)
-export function validateTexto(texto) {
-  const alunos = extrairAlunosDoTexto(texto);
-  const livros = livrosData;
-
-  function normalizarReviewParaCodigo(inp) {
-    const s = (inp || "").toString().trim().toUpperCase();
-    if (s === "WL" || s === "UL") return "1000";
-    if (s === "PP") return "1001";
-    if (s === "WE") return "1002";
-    if (s === "CP") return "1005";
-    const m = s.match(/^R(EVIEW)?\s*(\d+)$/i) || s.match(/^R(X|EVIEW)?\s*(\d+)$/i);
-    if (m) {
-      const num = m[2];
-      return num === "10" ? "1010" : num.repeat(4);
-    }
-    if (/^(\d)\1{3}$/.test(s)) return s;
-    return s;
-  }
-
-  const unknownBooks = [];
-  const invalidLessons = [];
-  let validCount = 0;
-
-  alunos.forEach(a => {
-    const seqOriginal = livros[a.livro];
-    if (!seqOriginal) {
-      unknownBooks.push(`${a.livro} (${a.nome})`);
-      return;
-    }
-    const seqCod = seqOriginal.map(x => normalizarReviewParaCodigo(x));
-    const atualCod = normalizarReviewParaCodigo(a.numeroRaw);
-    const idx = seqCod.indexOf(atualCod);
-    if (idx === -1) {
-      invalidLessons.push(`${a.numeroRaw} in ${a.livro} (${a.nome})`);
-      return;
-    }
-    validCount++;
-  });
-
-  return {
-    alunosCount: alunos.length,
-    validCount,
-    issues: { unknownBooks: [...new Set(unknownBooks)], invalidLessons: [...new Set(invalidLessons)] }
-  };
-}
-
 export async function processarTexto(texto, horarioStr, objectivesVisible, professorUserId) {
     const output = processarTextoComHorario(texto, horarioStr);
     try {

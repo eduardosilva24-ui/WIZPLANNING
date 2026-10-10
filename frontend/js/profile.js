@@ -37,8 +37,8 @@ class Profile {
     const bio = document.getElementById('profilePreviewBio');
     const meta = document.getElementById('profilePreviewMeta');
 
-    if (name) name.textContent = profile.name || 'Teacher';
-    if (bio) bio.textContent = profile.bio || 'No bio yet.';
+    if (name) name.textContent = profile.name || 'Professor';
+    if (bio) bio.textContent = profile.bio || 'Adicione uma breve apresentação sobre você.';
     if (meta) {
       meta.textContent = [profile.location, profile.specialties].filter(Boolean).join(' | ');
     }
@@ -56,7 +56,7 @@ class Profile {
     };
 
     try {
-      window.UI?.setButtonLoading(btn, true, 'Saving...');
+      window.UI?.setButtonLoading(btn, true, 'Salvando...');
       const profile = await window.API.updateProfile(payload);
       this.currentProfile = profile;
       localStorage.setItem('user', JSON.stringify(profile));
@@ -64,9 +64,9 @@ class Profile {
       await window.Auth?.loadUserProfile?.();
       await window.Rewards?.refreshRewards?.(true);
       await window.Notifications?.refreshUnreadCount?.();
-      window.UI?.showToast('Profile updated', 'success');
+      window.UI?.showToast('Perfil atualizado.', 'success');
     } catch (error) {
-      window.UI?.showToast(`Profile update failed: ${error.message}`, 'error');
+      window.UI?.showToast(`Não foi possível atualizar o perfil: ${error.message}`, 'error');
     } finally {
       window.UI?.setButtonLoading(btn, false);
     }

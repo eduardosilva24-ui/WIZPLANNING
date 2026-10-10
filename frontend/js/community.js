@@ -19,12 +19,12 @@ class Community {
     const submitBtn = e.target.querySelector('button[type="submit"]');
 
     if (!title) {
-      window.UI?.showToast('Please fill in the activity title', 'error');
+      window.UI?.showToast('Informe um título para a atividade.', 'error');
       return;
     }
 
     try {
-      window.UI?.setButtonLoading(submitBtn, true, 'Sharing...');
+      window.UI?.setButtonLoading(submitBtn, true, 'Compartilhando...');
       const formData = new FormData();
       formData.append('title', title);
       formData.append('description', description);
@@ -34,7 +34,7 @@ class Community {
 
       await window.API.uploadActivity(formData);
 
-      window.UI?.showToast('Activity shared successfully (+20 points)', 'success');
+      window.UI?.showToast('Atividade compartilhada com sucesso (+20 pontos).', 'success');
       document.getElementById('uploadForm').reset();
 
       await this.loadActivities();
@@ -42,7 +42,7 @@ class Community {
       if (window.Dashboard) await window.Dashboard.loadDashboardData(true);
       await window.Notifications?.refreshUnreadCount?.();
     } catch (error) {
-      window.UI?.showToast(`Share failed: ${error.message}`, 'error');
+      window.UI?.showToast(`Não foi possível compartilhar: ${error.message}`, 'error');
     } finally {
       window.UI?.setButtonLoading(submitBtn, false);
     }
@@ -54,12 +54,12 @@ class Community {
 
     try {
       this.isLoading = true;
-      window.UI?.renderState(container, 'loading', 'Loading community activities...');
+      window.UI?.renderState(container, 'loading', 'Carregando atividades da comunidade…');
       const activities = await window.API.getActivities(20, 0);
       this.displayActivities(activities);
     } catch (error) {
       console.error('Failed to load activities:', error);
-      window.UI?.renderState(container, 'error', 'Failed to load activities. Try again.');
+      window.UI?.renderState(container, 'error', 'Não foi possível carregar as atividades. Tente novamente.');
     } finally {
       this.isLoading = false;
     }
@@ -72,7 +72,7 @@ class Community {
     container.replaceChildren();
 
     if (!activities.length) {
-      window.UI?.renderState(container, 'empty', 'No activities shared yet. Be the first to upload one.');
+      window.UI?.renderState(container, 'empty', 'Ainda não há atividades compartilhadas. Seja o primeiro a publicar.');
       return;
     }
 
@@ -95,14 +95,14 @@ class Community {
 
       const authorText = document.createElement('span');
       authorText.className = 'activity-author-text';
-      authorText.textContent = activity.creator_name || 'Teacher';
+      authorText.textContent = activity.creator_name || 'Professor';
       authorBlock.append(avatar, authorText);
 
       const title = document.createElement('h3');
-      title.textContent = activity.title || 'Untitled activity';
+      title.textContent = activity.title || 'Atividade sem título';
 
       const description = document.createElement('p');
-      description.textContent = activity.description || 'No description';
+      description.textContent = activity.description || 'Sem descrição';
 
       const category = document.createElement('p');
       category.className = 'activity-category';
@@ -116,7 +116,7 @@ class Community {
         link.href = activity.file_url;
         link.target = '_blank';
         link.rel = 'noopener noreferrer';
-        link.textContent = 'Open file';
+        link.textContent = 'Abrir material';
         card.appendChild(link);
       }
 
@@ -124,16 +124,16 @@ class Community {
       meta.className = 'activity-meta';
 
       const author = document.createElement('span');
-      const date = activity.created_at ? new Date(activity.created_at).toLocaleDateString() : '';
-      author.textContent = `${activity.creator_name || 'Teacher'} | ${date}`;
+      const date = activity.created_at ? new Date(activity.created_at).toLocaleDateString('pt-BR') : '';
+      author.textContent = `${activity.creator_name || 'Professor'} · ${date}`;
 
       const likeBtn = document.createElement('button');
       likeBtn.className = `like-btn ${activity.likedByCurrentUser ? 'liked' : ''}`;
       likeBtn.dataset.activityId = String(activity.id);
       likeBtn.dataset.likes = String(activity.likes || 0);
-      likeBtn.title = 'Like';
+      likeBtn.title = 'Curtir atividade';
       likeBtn.type = 'button';
-      likeBtn.textContent = `${activity.likedByCurrentUser ? 'Liked' : 'Like'} ${activity.likes || 0}`;
+      likeBtn.textContent = `${activity.likedByCurrentUser ? 'Curtido' : 'Curtir'} · ${activity.likes || 0}`;
       likeBtn.addEventListener('click', (e) => {
         e.preventDefault();
         this.toggleLike(likeBtn);
@@ -169,21 +169,22 @@ class Community {
 
       const titleWrap = document.createElement('div');
       const title = document.createElement('h3');
-      title.textContent = profile.name || 'Teacher';
+      title.textContent = profile.name || 'Professor';
       const meta = document.createElement('p');
-      meta.textContent = [profile.location, profile.specialties].filter(Boolean).join(' | ') || profile.role || 'Teacher';
+      const role = profile.role === 'teacher' ? 'Professor' : profile.role === 'admin' ? 'Administrador' : profile.role;
+      meta.textContent = [profile.location, profile.specialties].filter(Boolean).join(' · ') || role || 'Professor';
       titleWrap.append(title, meta);
       header.append(avatar, titleWrap);
 
       const bio = document.createElement('p');
       bio.className = 'teacher-profile-bio';
-      bio.textContent = profile.bio || 'No bio yet.';
+      bio.textContent = profile.bio || 'Esta pessoa ainda não adicionou uma apresentação.';
 
       const actions = document.createElement('div');
       actions.className = 'modal-actions';
       const close = document.createElement('button');
       close.type = 'button';
-      close.textContent = 'Close';
+      close.textContent = 'Fechar';
       close.addEventListener('click', () => modal.remove());
       actions.appendChild(close);
 
@@ -194,7 +195,7 @@ class Community {
       });
       document.body.append(modal);
     } catch (error) {
-      window.UI?.showToast(`Could not load profile: ${error.message}`, 'error');
+      window.UI?.showToast(`Não foi possível carregar o perfil: ${error.message}`, 'error');
     }
   }
 
@@ -215,10 +216,10 @@ class Community {
       const currentLikes = parseInt(btn.dataset.likes || '0', 10);
       const nextLikes = isLiked ? Math.max(0, currentLikes - 1) : currentLikes + 1;
       btn.dataset.likes = String(nextLikes);
-      btn.textContent = `${isLiked ? 'Like' : 'Liked'} ${nextLikes}`;
+      btn.textContent = `${isLiked ? 'Curtir' : 'Curtido'} · ${nextLikes}`;
       await window.Notifications?.refreshUnreadCount?.();
     } catch (error) {
-      window.UI?.showToast(`Action failed: ${error.message}`, 'error');
+      window.UI?.showToast(`Não foi possível concluir a ação: ${error.message}`, 'error');
     }
   }
 }

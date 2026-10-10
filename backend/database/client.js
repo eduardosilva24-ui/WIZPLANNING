@@ -99,8 +99,94 @@ class PostgresCompatDatabase {
       .catch((err) => callback(err));
   }
 
+  async withTransaction(work) {
+    const client = await this.pool.connect();
+    const transaction = {
+      all: async (sql, params = []) => {
+        const result = await client.query(normalizePostgresSql(sql), params);
+        return result.rows || [];
+      },
+      get: async (sql, params = []) => {
+        const result = await client.query(normalizePostgresSql(sql), params);
+        return result.rows?.[0] || null;
+      },
+      run: async (sql, params = []) => {
+        const result = await client.query(withReturningId(normalizePostgresSql(sql)), params);
+        return { lastID: result.rows?.[0]?.id ?? null, changes: result.rowCount || 0 };
+      },
+      exec: async (sql) => client.query(sql),
+      lock: async (key) => client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [String(key)])
+    };
+
+    try {
+      await client.query('BEGIN');
+      const result = await work(transaction);
+      await client.query('COMMIT');
+      return result;
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   close(callback = () => {}) {
     callback();
+  }
+}
+
+function sqliteRun(db, sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.run(sql, params, function (error) {
+      if (error) reject(error);
+      else resolve({ lastID: this.lastID, changes: this.changes });
+    });
+  });
+}
+
+function sqliteQuery(db, method, sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db[method](sql, params, (error, result) => {
+      if (error) reject(error);
+      else resolve(method === 'all' ? result || [] : result || null);
+    });
+  });
+}
+
+const sqliteTransactionTails = new WeakMap();
+
+export async function withDatabaseTransaction(db, work) {
+  if (typeof db.withTransaction === 'function') return db.withTransaction(work);
+
+  const previousTransaction = sqliteTransactionTails.get(db) || Promise.resolve();
+  let releaseTransaction;
+  const currentTransaction = new Promise((resolve) => { releaseTransaction = resolve; });
+  sqliteTransactionTails.set(db, previousTransaction.then(() => currentTransaction));
+  await previousTransaction;
+
+  let transactionStarted = false;
+  try {
+    await sqliteRun(db, 'BEGIN IMMEDIATE');
+    transactionStarted = true;
+    const transaction = {
+      all: (sql, params = []) => sqliteQuery(db, 'all', sql, params),
+      get: (sql, params = []) => sqliteQuery(db, 'get', sql, params),
+      run: (sql, params = []) => sqliteRun(db, sql, params),
+      exec: (sql) => new Promise((resolve, reject) => {
+        db.exec(sql, (error) => error ? reject(error) : resolve());
+      }),
+      lock: async () => {}
+    };
+
+    const result = await work(transaction);
+    await sqliteRun(db, 'COMMIT');
+    return result;
+  } catch (error) {
+    if (transactionStarted) await sqliteRun(db, 'ROLLBACK').catch(() => {});
+    throw error;
+  } finally {
+    releaseTransaction();
   }
 }
 

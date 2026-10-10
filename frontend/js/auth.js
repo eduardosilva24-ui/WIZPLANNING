@@ -59,10 +59,10 @@ class Auth {
       const registerPassword = document.getElementById('registerPassword');
       const registerPasswordGroup = registerPassword?.closest('.form-group');
 
-      if (loginLabel) loginLabel.textContent = 'Name or User ID';
+      if (loginLabel) loginLabel.textContent = 'Nome ou ID de usuário';
       if (loginInput) {
         loginInput.type = 'text';
-        loginInput.placeholder = 'Exact name or user ID from Google Sheets';
+        loginInput.placeholder = 'Nome exato ou ID de usuário cadastrado';
       }
       if (loginPassword) loginPassword.required = false;
       if (loginPasswordGroup) loginPasswordGroup.classList.add('hidden');
@@ -87,15 +87,25 @@ class Auth {
       // Reload page to show main app
       window.location.reload();
     } catch (error) {
-      window.UI?.showToast(`Login failed: ${error.message}`, 'error');
+      window.UI?.showToast(`Não foi possível entrar: ${error.message}`, 'error');
     }
   }
 
   static async handleRegister(e) {
     e.preventDefault();
-    const name = document.getElementById('registerName').value.trim();
+    const registerForm = document.getElementById('registerForm');
+    const submitButton = registerForm.querySelector('button[type="submit"]');
+    if (submitButton?.disabled) return;
+
+    const name = document.getElementById('registerName').value.replace(/\s+/g, ' ').trim();
     const email = document.getElementById('registerEmail').value.trim().toLowerCase();
     const password = document.getElementById('registerPassword').value;
+    const originalButtonText = submitButton?.textContent || '';
+    if (submitButton) {
+      submitButton.disabled = true;
+      submitButton.setAttribute('aria-busy', 'true');
+      submitButton.textContent = 'Criando conta…';
+    }
 
     try {
       const result = await window.API.register(name, email, password);
@@ -105,10 +115,16 @@ class Auth {
         window.location.reload();
         return;
       }
-      window.UI?.showToast('Registration successful! Please login.', 'success');
+      window.UI?.showToast('Cadastro concluído. Faça login para continuar.', 'success');
       document.getElementById('registerForm').reset();
     } catch (error) {
-      window.UI?.showToast(`Registration failed: ${error.message}`, 'error');
+      window.UI?.showToast(`Não foi possível criar a conta: ${error.message}`, 'error');
+    } finally {
+      if (submitButton?.isConnected) {
+        submitButton.disabled = false;
+        submitButton.removeAttribute('aria-busy');
+        submitButton.textContent = originalButtonText;
+      }
     }
   }
 
@@ -151,8 +167,8 @@ class Auth {
 
       window.UI?.showToast(
         error && error.message
-          ? `Failed to load user profile: ${error.message}`
-          : 'Failed to load user profile',
+          ? `Não foi possível carregar seu perfil: ${error.message}`
+          : 'Não foi possível carregar seu perfil.',
         'error'
       );
       throw error;

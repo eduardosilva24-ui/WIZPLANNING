@@ -48,8 +48,8 @@ function extractObjectLiteral(text, marker) {
 // 📂 LOAD PLANNER SOURCE (Apps Script Export or raw .gs)
 // ================================
 /**
- * FINAL.JSON no projeto costuma ser o Code.gs colado — não é JSON válido.
- * Aceita também export JSON { files: { "1": { source } } } e tmp_final_code.gs.
+ * Reads the canonical single-file Code.gs, with legacy import/export formats
+ * retained for data-migration compatibility.
  */
 function loadPlannerSource() {
   const simple = [
@@ -76,7 +76,7 @@ function loadPlannerSource() {
 
   if (fs.existsSync(tmpFallback)) return fs.readFileSync(tmpFallback, 'utf8');
   throw new Error(
-    'Nenhuma fonte do planejador encontrada. Use google-apps-script/FINAL.JSON (Code.gs colado) ou tmp_final_code.gs na raiz do projeto.'
+    'Nenhuma fonte do planejador encontrada. A fonte canônica é google-apps-script/Code.gs.'
   );
 }
 

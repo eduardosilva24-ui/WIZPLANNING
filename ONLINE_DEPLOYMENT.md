@@ -2,7 +2,11 @@
 
 ## Backend
 
-Google Apps Script backend:
+The Apps Script project is intentionally a single-file project. The complete
+planner, its HTML interface, the Google Sheets API, and the Gemini review
+endpoint are all in `google-apps-script/Code.gs`.
+
+The published Google Apps Script Web App:
 
 ```text
 https://script.google.com/macros/s/AKfycbxwobTuDMafuitKSFXKzN6B95QRvdMRR00GrHMfC73C4n-8ks94atyTYbCeHdt7qGd3/exec
@@ -10,13 +14,35 @@ https://script.google.com/macros/s/AKfycbxwobTuDMafuitKSFXKzN6B95QRvdMRR00GrHMfC
 
 The frontend reads this URL from `frontend/js/config.js`.
 
-Paste the full backend from:
+In the Apps Script editor, keep only `Code.gs` and replace its contents with
+the full file from:
 
 ```text
-google-apps-script/WizPlanningOnlineBackend.gs
+google-apps-script/Code.gs
 ```
 
-Then deploy a new Web App version in Apps Script.
+The same `doGet` serves the planner interface when there is no `action` query
+parameter and serves JSON API requests when an `action` is provided. `doPost`
+handles writes and the AI review. After pasting the file, deploy a new Web App
+version in Apps Script.
+
+### Gemini AI review
+
+The planner's AI review is proxied by Apps Script, so the Gemini API key is
+never sent to GitHub Pages or stored in the repository. In the Apps Script
+project, add these entries under **Project Settings → Script Properties**:
+
+| Property | Value |
+| --- | --- |
+| `GEMINI_API_KEY` | The Gemini API key |
+| `GEMINI_MODEL` | Optional; defaults to `gemini-flash-latest` |
+| `GEMINI_DAILY_REVIEW_LIMIT` | Optional global daily limit; defaults to `100` reviews |
+
+After saving the properties, authorize external requests as the Apps Script
+owner if Google prompts, then deploy a **new version** of the Web App. The daily
+limit is shared by all visitors to this Web App deployment; it helps cap usage,
+but it is not per-user authentication. Do not put the API key in frontend files,
+GitHub, or a public issue. Rotate the key if it has been exposed publicly.
 
 ## What Is Online In Google Sheets
 

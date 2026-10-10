@@ -1,57 +1,77 @@
 import bcryptjs from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import dotenv from 'dotenv';
-import { openDatabase } from '../database/client.js';
+import { openDatabase, withDatabaseTransaction } from '../database/client.js';
 import RewardService from './RewardService.js';
 
 dotenv.config();
 
+export function normalizeTeacherName(value) {
+  return String(value || '')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+function accountConflict(message) {
+  const error = new Error(message);
+  error.status = 409;
+  error.code = 'ACCOUNT_CONFLICT';
+  return error;
+}
+
 export class AuthService {
-  constructor() {
-    this.db = openDatabase();
+  constructor(database = openDatabase()) {
+    this.db = database;
   }
 
   /**
    * Register a new user
    */
-  async register(name, email, password, role = 'teacher') {
-    return new Promise((resolve, reject) => {
-      if (!name || !email || !password) {
-        reject(new Error('Missing required fields'));
-        return;
-      }
+  async register(name, email, password) {
+    const nameNorm = String(name || '').replace(/\s+/g, ' ').trim();
+    const emailNorm = String(email || '').trim().toLowerCase();
+    if (!nameNorm || !emailNorm || !password) throw new Error('Missing required fields');
+    if (nameNorm.length < 2 || nameNorm.length > 80) {
+      const error = new Error('O nome deve ter entre 2 e 80 caracteres.');
+      error.status = 400;
+      throw error;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailNorm)) {
+      const error = new Error('Informe um e-mail válido.');
+      error.status = 400;
+      throw error;
+    }
 
-      const emailNorm = String(email).trim().toLowerCase();
-      const hashedPassword = bcryptjs.hashSync(password, 10);
-      const db = this.db;
-
-      db.run(
-        `INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, ?)`,
-        [String(name).trim(), emailNorm, hashedPassword, role],
-        function(err) {
-          if (err) {
-            if (err.code === '23505' || err.message.includes('UNIQUE constraint failed')) {
-              reject(new Error('Email already registered'));
-            } else {
-              reject(err);
-            }
-            return;
-          }
-
-          const userId = this.lastID;
-
-          // Create reward record for new user
-          db.run(
-            `INSERT INTO rewards (user_id, points) VALUES (?, ?)`,
-            [userId, 0],
-            (err) => {
-              if (err) reject(err);
-              else resolve({ id: userId, name: String(name).trim(), email: emailNorm, role });
-            }
-          );
+    const hashedPassword = bcryptjs.hashSync(password, 10);
+    const assignedRole = 'teacher';
+    try {
+      return await withDatabaseTransaction(this.db, async (transaction) => {
+        await transaction.lock('wizplanning:user-registration');
+        const existingUsers = await transaction.all('SELECT id, name, email FROM users');
+        if (existingUsers.some(user => String(user.email || '').trim().toLowerCase() === emailNorm)) {
+          throw accountConflict('Já existe uma conta com este e-mail.');
         }
-      );
-    });
+        const normalizedName = normalizeTeacherName(nameNorm);
+        if (existingUsers.some(user => normalizeTeacherName(user.name) === normalizedName)) {
+          throw accountConflict('Já existe uma conta com este nome.');
+        }
+
+        const inserted = await transaction.run(
+          `INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, ?)`,
+          [nameNorm, emailNorm, hashedPassword, assignedRole]
+        );
+        await transaction.run(`INSERT INTO rewards (user_id, points) VALUES (?, ?)`, [inserted.lastID, 0]);
+        return { id: inserted.lastID, name: nameNorm, email: emailNorm, role: assignedRole };
+      });
+    } catch (error) {
+      if (error.code === '23505' || error.message.includes('UNIQUE constraint failed')) {
+        throw accountConflict('Já existe uma conta com este e-mail ou nome.');
+      }
+      throw error;
+    }
   }
 
   /**
@@ -160,16 +180,23 @@ export class AuthService {
       throw new Error('Name is required');
     }
 
-    await new Promise((resolve, reject) => {
-      this.db.run(
+    const currentUser = await this.getUserById(userId);
+    if (!currentUser) throw new Error('User not found');
+
+    await withDatabaseTransaction(this.db, async (transaction) => {
+      await transaction.lock('wizplanning:user-registration');
+      if (normalizeTeacherName(next.name) !== normalizeTeacherName(currentUser.name)) {
+        const existingUsers = await transaction.all('SELECT id, name FROM users');
+        const normalizedName = normalizeTeacherName(next.name);
+        if (existingUsers.some(user =>
+          String(user.id) !== String(userId) && normalizeTeacherName(user.name) === normalizedName
+        )) throw accountConflict('Já existe uma conta com este nome.');
+      }
+      await transaction.run(
         `UPDATE users
          SET name = ?, bio = ?, location = ?, phone = ?, specialties = ?, updated_at = CURRENT_TIMESTAMP
          WHERE id = ?`,
-        [next.name, next.bio, next.location, next.phone, next.specialties, userId],
-        function(err) {
-          if (err) reject(err);
-          else resolve(this);
-        }
+        [next.name, next.bio, next.location, next.phone, next.specialties, userId]
       );
     });
 
@@ -253,5 +280,6 @@ export class AuthService {
     this.db.close();
   }
 }
+
 
 export default AuthService;

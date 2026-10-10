@@ -365,3 +365,5 @@ For issues or feature requests, refer to the documentation or check the API endp
 =======
 # WIZPLANNING
 >>>>>>> 29565c645fa33e63480047ea0c548ef27cd60b1c
+#   W i z P l a n n e r 3 . 0  
+ 
